@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <record id="view_order_form_material_reservation" model="ir.ui.view">
+        <field name="name">sale.order.form.material.reservation</field>
+        <field name="model">sale.order</field>
+        <field name="inherit_id" ref="sale.view_order_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//div[@name='button_box']" position="inside">
+                <button type="object" name="action_view_reservations"
+                        class="oe_stat_button" icon="fa-cubes"
+                        invisible="reservation_count == 0">
+                    <field name="reservation_count" widget="statinfo" string="Reservas"/>
+                </button>
+            </xpath>
+            <notebook position="inside">
+                <page string="Reserva de Materiales">                    
+
+                    <!-- Vista de líneas de reserva de materiales -->
+                    <field name="material_reservation_ids" context="{'default_order_id': active_id}">
+                        <tree editable="bottom">
+                            <field name="product_id" string="Producto"/>
+                            <field name="product_uom_qty" string="Cantidad"/>
+                            <field name="qty_done" readonly="1" string="Hechas"/>
+                            <field name="product_uom" string ="UdM" readonly="1"/>
+                            <field name="availability" widget="availability" readonly="1" string="Disponibilidad"/>
+                            
+                        </tree>
+                        
+                        <!-- Formulario para editar líneas de reserva de material -->
+                        <form string="Reserva de Materiales">
+                            <group>
+                                <field name="product_id"/>
+                                <field name="product_uom_qty"/>
+                                <field name="qty_done" readonly="1" string="Hechas"/>
+                                <field name="product_uom"/>
+                                <field name="availability" widget="availability" readonly="1" string="Disponibilidad"/>
+                                
+                            </group>
+                        </form>
+                    </field>
+                </page>
+            </notebook>
+        </field>
+    </record>
+</odoo>
