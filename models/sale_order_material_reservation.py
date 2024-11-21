@@ -79,14 +79,14 @@ class SaleOrder(models.Model):
         """Define el almacén por defecto basado en la empresa activa del usuario."""
 
         company_id = self.env.company.id
-        _logger.warning(f"Compañia actual: ID:{ company_id  } - Nombre: { self.env.company.name }")
+        #_logger.warning(f"Compañia actual: ID:{ company_id  } - Nombre: { self.env.company.name }")
 
         default_warehouses = self.env['stock.warehouse'].search([
             ('company_id', '=', self.env.company.id)
         ])
         "Estoy en NOA"
         if company_id == 2:
-            _logger.warning(f"Almacenes de NOA: { default_warehouses } ")
+            #_logger.warning(f"Almacenes de NOA: { default_warehouses } ")
             #Eligo como almacen predeterminado NOA Aberturas en Cristalizando
             default_warehouse = default_warehouses[1]
         elif company_id == 3:
@@ -126,16 +126,52 @@ class SaleOrder(models.Model):
             self.action_create_material_reservation()
         return res
 
+
+    def action_create_material_reservation(self):
+        """Botón para crear manualmente la transferencia de reserva."""
+        
+        self.ensure_one()
+        if not self.material_reservation_ids:
+            raise UserError("No hay productos en la reserva de materiales.")
+       
+        picking = self._create_material_reservation_picking()
+        #picking['has_reservation']=1
+
+        # Verificar si ya se generó la reserva de materiales
+        #if self.material_reservation_picking_generated:
+        #    raise UserError("La reserva de materiales ya ha sido generada para esta orden.")
+
+        # Agregar el picking a picking_ids
+        """
+        self.write({
+            'picking_ids': [(4, picking.id)],
+            #'material_reservation_picking_generated': True,
+        })
+        """
+
+        #_logger.warning(f"Transferencia: {picking} \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
+        
+        self.delivery_count += 1  # Actualiza el contador de reserva
+        
+        self._compute_material_reservation_status()  # Recalcula el estado de la reserva
+
+
+    #helpers
+    def _get_picking_type(self):
+        """Retrieve the picking type for outgoing shipments based on the selected warehouse."""
+        picking_type = self.env['stock.picking.type'].search([
+            ('warehouse_id', '=', self.x_studio_almacen_1.id),
+            ('company_id', '=', self.company_id.id),
+            ('code', '=', 'outgoing'),
+        ], limit=1)
+        if not picking_type:
+            raise UserError(_("No existe un tipo de salida para el almacen seleccionado."))
+        return picking_type
+
     def _create_material_reservation_picking(self):
-        # Obtiene el almacén de la orden de venta desde el campo personalizado
-        warehouse = self.x_studio_almacen_1
 
         # Crea la transferencia de salida utilizando el almacén seleccionado
-        picking_type = self.env['stock.picking.type'].search([
-            ('warehouse_id', '=', warehouse.id),
-            ('company_id', '=', self.company_id.id),  # Asegura que el tipo de picking sea de la misma empresa
-            ('code', '=', 'outgoing')  # Código para albarán de salida
-        ], limit=1)
+        picking_type = self._get_picking_type()
 
         # Revisa si se encontró un tipo de picking para el almacén especificado
         if not picking_type:
@@ -159,15 +195,8 @@ class SaleOrder(models.Model):
         })
 
 
-        _logger.warning(f"Transferencia: {picking} \nTipo de transferencia: {picking_type}  \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
-        """
-        #self.procurement_group_id['stock_move_ids']=picking.id
-        grupo=self.env['procurement.group'].browse(self.procurement_group_id.id)
-        grupo.write({
-            'stock_move_ids': [(4, picking.id)],
-            #'material_reservation_picking_generated': True,
-        })
-        """
+        ##_logger.warning(f"Transferencia: {picking} \nTipo de transferencia: {picking_type}  \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
+        
         
 
         self._add_moves_to_picking(picking,picking_type)
@@ -217,63 +246,11 @@ class SaleOrder(models.Model):
             
         # Asigna los IDs al campo 'move_id_without_package' usando Command.clear y Command.set
         picking['move_ids_without_package'] = [Command.clear(), Command.set(move_ids)]
-
-    
-    def _update_material_reservation_picking(self, picking):
-        """Actualiza un picking existente con nuevas cantidades o productos."""
-        for line in self.material_reservation_ids:
-            move = picking.move_ids_without_package.filtered(lambda m: m.product_id == line.product_id)
-            if move:
-                move.write({'product_uom_qty': line.product_uom_qty})
-            else:
-                self.env['stock.move'].create({
-                    'name': line.name or line.product_id.name,
-                    'product_id': line.product_id.id,
-                    'product_uom_qty': line.product_uom_qty,
-                    'product_uom': line.product_uom.id,
-                    'location_id': picking.location_id.id,
-                    'location_dest_id': picking.location_dest_id.id,
-                    'picking_id': picking.id,
-                    'company_id': self.company_id.id,
-                    'state': 'assigned',
-                })
-
-
-    
                 
-
-    def action_create_material_reservation(self):
-        """Botón para crear manualmente la transferencia de reserva."""
-        
-        self.ensure_one()
-        if not self.material_reservation_ids:
-            raise UserError("No hay productos en la reserva de materiales.")
-       
-        picking = self._create_material_reservation_picking()
-        #picking['has_reservation']=1
-
-        # Verificar si ya se generó la reserva de materiales
-        #if self.material_reservation_picking_generated:
-        #    raise UserError("La reserva de materiales ya ha sido generada para esta orden.")
-
-        # Agregar el picking a picking_ids
-        """
-        self.write({
-            'picking_ids': [(4, picking.id)],
-            #'material_reservation_picking_generated': True,
-        })
-        """
-
-        _logger.warning(f"Transferencia: {picking} \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
-        
-        self.delivery_count += 1  # Actualiza el contador de reserva
-        
-        self._compute_material_reservation_status()  # Recalcula el estado de la reserva
-
 
     @api.onchange('material_reservation_ids')
     def _onchange_material_reservation_ids(self):
-        _logger.warning("Iniciando actualización de las cantidades de las líneas en la transferencia.")
+        #_logger.warning("Iniciando actualización de las cantidades de las líneas en la transferencia.")
         
         # Filtrar solo las transferencias con reservas
         pickings = self.picking_ids.filtered(lambda p: p.has_reservation)
@@ -281,7 +258,7 @@ class SaleOrder(models.Model):
         # Verificar si hay transferencias con reservas
         if pickings:
             for picking in pickings:
-                _logger.warning(f"Actualizando picking con ID {picking.id} que tiene reservas.")
+                #_logger.warning(f"Actualizando picking con ID {picking.id} que tiene reservas.")
                 
                 # Iterar a través de las líneas de reserva en material_reservation_ids
                 for reservation_line in self.material_reservation_ids:
@@ -292,7 +269,7 @@ class SaleOrder(models.Model):
     
                     # Si existe una línea de stock.move que coincide, actualizamos la cantidad
                     if matching_move_line:
-                        _logger.warning(f"Actualizando cantidad en la línea de picking para el producto {reservation_line.product_id.name}\n matching_move_line: {matching_move_line}")
+                        #_logger.warning(f"Actualizando cantidad en la línea de picking para el producto {reservation_line.product_id.name}\n matching_move_line: {matching_move_line}")
 
                         # Actualizo la cantidad en la linea correspondiente
                         self.env['stock.move'].browse(matching_move_line._origin.id).product_uom_qty = reservation_line.product_uom_qty
@@ -392,7 +369,7 @@ class SaleOrderMaterialReservationLine(models.Model):
 
 
     def write(self, vals):
-        _logger.warning(f"Entrando en write de la linea de reserva. Valores: {vals}")
+        #_logger.warning(f"Entrando en write de la linea de reserva. Valores: {vals}")
         res = super(SaleOrderMaterialReservationLine, self).write(vals)
         for line in self:
             # Verificar si se está cambiando la cantidad
@@ -401,17 +378,17 @@ class SaleOrderMaterialReservationLine(models.Model):
                 if new_qty < line.qty_done:
                     raise UserError("No puedes reducir la cantidad por debajo de la cantidad hecha.")
 
-                _logger.warning(f"linea {line} - {line.picking_id}")
-                _logger.warning(f"Orden de venta {self.order_id}")
+                #_logger.warning(f"linea {line} - {line.picking_id}")
+                #_logger.warning(f"Orden de venta {self.order_id}")
                 pickings = self.order_id.sale_stock_link_id.picking_ids
-                _logger.warning(f"pickings: {pickings}")
+                #_logger.warning(f"pickings: {pickings}")
                 # Actualizar transacciones relacionadas
                 if pickings:
                     for move in pickings.move_ids.filtered(lambda m: m.state not in ('done', 'cancel')):
-                        _logger.warning(f"movimiento {move}")
+                        #_logger.warning(f"movimiento {move}")
                         # Actualizar la demanda si coincide con la línea de reserva
                         if move.reservation_line_id == line:
-                            _logger.warning(f"linea de reserva {move.reservation_line_id} - {line}")
+                            #_logger.warning(f"linea de reserva {move.reservation_line_id} - {line}")
                             remaining_qty = new_qty - line.qty_done
                             move.product_uom_qty = max(0, remaining_qty)
                             
@@ -454,10 +431,10 @@ class SaleOrderMaterialReservationLine(models.Model):
     def _compute_name(self):
 
         for line in self:
-            _logger.warning(f"QComputing Name")
+            #_logger.warning(f"QComputing Name")
             if line.order_id and line.product_id:
                 line.name = f"{line.order_id.name} - {line.product_id.name}"
-                _logger.warning(f"name: {line.name}")
+                #_logger.warning(f"name: {line.name}")
             elif self.order_id:
                 line.name = f"{self.order_id}"
             else:
