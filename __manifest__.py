@@ -3,9 +3,9 @@
     'name': 'Sale Material Reservation',
     'version': '1.0',
     'summary': 'Agregar una pestaña en la orden de venta para gestionar reservas de materiales.',
-    'depends': ['sale_management','sale', 'stock'],
+    'depends': ['sale_management', 'stock'],
     'author': 'Tu Nombre',
-    'category': 'Sales',
+    'category': 'Sale',
     'author': 'Your Name',
     'data': [
         'security/ir.model.access.csv',
