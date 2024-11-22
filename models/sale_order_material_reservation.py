@@ -43,6 +43,12 @@ class SaleOrder(models.Model):
         compute='_compute_reservation_count',
         store=True
     )
+
+    material_reservation_locked = fields.Boolean(
+        string="Material Reservation Locked",
+        compute="_compute_material_reservation_locked",
+        store=True,
+    )
     
     # Computed Fields    
     @api.depends('sale_stock_link_id.picking_ids')
@@ -53,6 +59,11 @@ class SaleOrder(models.Model):
             else:
                 order.reservation_count = 0
 
+    @api.depends('state')
+    def _compute_material_reservation_locked(self):
+        """Bloquea la reserva de materiales si la orden está bloqueada."""
+        for order in self:
+            order.material_reservation_locked = order.state in ['done', 'cancel']
 
     @api.depends('material_reservation_ids.product_uom_qty', 'picking_ids.state')
     def _compute_material_reservation_status(self):
@@ -405,7 +416,6 @@ class SaleOrderMaterialReservationLine(models.Model):
                     
         return res
 
-
     
     @api.depends('product_uom_qty', 'qty_done')
     def _compute_qty_pending(self):
@@ -419,6 +429,7 @@ class SaleOrderMaterialReservationLine(models.Model):
             if not line.product_uom or (line.product_id.uom_id.id != line.product_uom.id):
                 line.product_uom = line.product_id.uom_id
 
+
     @api.depends('order_id', 'product_id')
     def _compute_name(self):
         for line in self:
@@ -430,6 +441,7 @@ class SaleOrderMaterialReservationLine(models.Model):
                 line.name = f"No Order - {line.product_id.name}"
             else:
                 line.name = "No Description"
+
 
     @api.depends('price_unit', 'product_uom_qty')
     def _update_subtotal(self):
