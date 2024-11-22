@@ -2,10 +2,11 @@
 {
     'name': 'Sale Material Reservation',
     'version': '1.0',
+    'summary': 'Agregar una pestaña en la orden de venta para gestionar reservas de materiales.',
     'depends': ['sale_management','sale', 'stock'],
     'author': 'Tu Nombre',
     'category': 'Sales',
-    'summary': 'Agregar una pestaña en la orden de venta para gestionar reservas de materiales.',
+    'author': 'Your Name',
     'data': [
         'security/ir.model.access.csv',
         'views/sale_order_views.xml',
@@ -13,4 +14,5 @@
     ],
     'installable': True,
     'application': False,
+    'license': 'LGPL-3',
 }
