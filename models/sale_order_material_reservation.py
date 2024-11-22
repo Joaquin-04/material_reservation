@@ -15,7 +15,7 @@ class SaleOrder(models.Model):
         string="Material Reservation"
     )
 
-    x_studio_almacen_1 = fields.Many2one(
+    studio_almacen = fields.Many2one(
         'stock.warehouse', 
         string="Almacén", 
         default=lambda self: self._get_default_warehouse()
@@ -158,7 +158,7 @@ class SaleOrder(models.Model):
     def _get_picking_type(self):
         """Retrieve the picking type for outgoing shipments based on the selected warehouse."""
         picking_type = self.env['stock.picking.type'].search([
-            ('warehouse_id', '=', self.x_studio_almacen_1.id),
+            ('warehouse_id', '=', self.studio_almacen.id),
             ('company_id', '=', self.company_id.id),
             ('code', '=', 'outgoing'),
         ], limit=1)
