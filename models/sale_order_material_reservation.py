@@ -248,7 +248,7 @@ class SaleOrder(models.Model):
 
     @api.onchange('material_reservation_ids')
     def _onchange_material_reservation_ids(self):
-        #_logger.warning("Iniciando actualización de las cantidades de las líneas en la transferencia.")
+        #_logger.warning("Iniciando actualización de las cantidades de las líneas en la transferencia.\n _onchange_material_reservation_ids")
         
         # Filtrar solo las transferencias con reservas
         pickings = self.picking_ids.filtered(lambda p: p.has_reservation)
@@ -288,7 +288,7 @@ class SaleOrderMaterialReservationLine(models.Model):
 
     name = fields.Text(
     string="Description",
-    store=True, readonly=False, required=True,
+    store=True, readonly=False, required=False,
     compute='_compute_name'
     )
 
@@ -382,36 +382,30 @@ class SaleOrderMaterialReservationLine(models.Model):
                 #_logger.warning(f"pickings: {pickings}")
                 # Actualizar transacciones relacionadas
                 if pickings:
-                    for move in pickings.move_ids.filtered(lambda m: m.state not in ('done', 'cancel')):
-                        #_logger.warning(f"movimiento {move}")
-                        # Actualizar la demanda si coincide con la línea de reserva
-                        if move.reservation_line_id == line:
-                            #_logger.warning(f"linea de reserva {move.reservation_line_id} - {line}")
-                            remaining_qty = new_qty - line.qty_done
-                            move.product_uom_qty = max(0, remaining_qty)
-                            
-                            # Cancelar movimiento si la demanda es 0
-                            if move.product_uom_qty == 0:
-                                move.state = 'cancel'
-
-                    # Cancelar la transacción si todas las demandas son 0
-                    if all(m.product_uom_qty == 0 for m in line.picking_id.move_ids):
-                        line.picking_id.state = 'cancel'
+                    filtered_pickings=pickings.move_ids.filtered(lambda m: m.state not in ('done', 'cancel'))
+                    if filtered_pickings:
+                        for move in filtered_pickings:
+                            #_logger.warning(f"movimiento {move}")
+                            # Actualizar la demanda si coincide con la línea de reserva
+                            if move.reservation_line_id == line:
+                                #_logger.warning(f"linea de reserva {move.reservation_line_id} - {line}")
+                                remaining_qty = new_qty - line.qty_done
+                                move.product_uom_qty = max(0, remaining_qty)
+                                
+                                # Cancelar movimiento si la demanda es 0
+                                if move.product_uom_qty == 0:
+                                    move.state = 'cancel'
+    
+                        # Cancelar la transacción si todas las demandas son 0
+                        if all(m.product_uom_qty == 0 for m in line.picking_id.move_ids):
+                            line.picking_id.state = 'cancel'
+                else:
+                    _logger.warning(f"no hay transacciones pendientes")
+                    #No hay ordenes pendientes
+                    
         return res
 
 
-
-        """
-        # Restricción para que la cantidad no sea menor que qty_done
-        @api.constrains('product_uom_qty')
-        def _check_qty_done(self):
-            for line in self:
-                if line.product_uom_qty < line.qty_done:
-                    raise ValidationError(
-                        _("La cantidad no puede ser menor que la cantidad hecha: (%s).") % line.qty_done
-                    )
-    
-        """
     
     @api.depends('product_uom_qty', 'qty_done')
     def _compute_qty_pending(self):
@@ -425,18 +419,17 @@ class SaleOrderMaterialReservationLine(models.Model):
             if not line.product_uom or (line.product_id.uom_id.id != line.product_uom.id):
                 line.product_uom = line.product_id.uom_id
 
-    @api.depends('order_id','product_id')
+    @api.depends('order_id', 'product_id')
     def _compute_name(self):
-
         for line in self:
-            #_logger.warning(f"QComputing Name")
             if line.order_id and line.product_id:
                 line.name = f"{line.order_id.name} - {line.product_id.name}"
-                #_logger.warning(f"name: {line.name}")
-            elif self.order_id:
-                line.name = f"{self.order_id}"
+            elif line.order_id:
+                line.name = f"{line.order_id.name} - No Product"
+            elif line.product_id:
+                line.name = f"No Order - {line.product_id.name}"
             else:
-                line.name=""
+                line.name = "No Description"
 
     @api.depends('price_unit', 'product_uom_qty')
     def _update_subtotal(self):
