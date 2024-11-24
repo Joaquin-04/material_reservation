@@ -1,4 +1,4 @@
-from odoo import models, fields
+from odoo import api, fields, models, _ , Command
 import logging
 
 _logger = logging.getLogger(__name__)
@@ -34,14 +34,26 @@ class StockMove(models.Model):
     sale_stock_link_id = fields.Many2one('sale.stock.link', string='Sale Stock Link')
     
     reservation_line_id = fields.Many2one('sale.order.material.reservation.line', 'Reservation Line')
-
+    
     def _action_done(self, cancel_backorder=False):
         for move in self:
-            if not move.sale_line_id:
-                # Actualizar qty_done en la línea de reserva
-                move.reservation_line_id['qty_done'] += move.quantity
-                _logger.warning(f"cantidad hechas {move.quantity} - {move.reservation_line_id.qty_done}")
-                # Si no hay línea de venta, asegúrate de que no intente actualizar qty_delivered
-                move.sale_line_id = False
+            # Si hay una línea de reserva, realiza las actualizaciones
+            if move.reservation_line_id:
+                move.reservation_line_id.qty_done += move.quantity or 0
+                _logger.warning(f"Cantidad hechas {move.quantity} - {move.reservation_line_id.qty_done}")
+            else:
+                _logger.warning(f"El movimiento {move.id} no está relacionado con ninguna línea de reserva.")
+        
+        # Llama al método original para completar la operación
         return super(StockMove, self)._action_done(cancel_backorder=cancel_backorder)
 
+
+    @api.model
+    def create(self, vals):
+        # Si 'reservation_line_id' no está presente, no se fuerza su asignación
+        vals['quantity'] = 0.0    # Cantidad hecha
+        record = super().create(vals)
+
+        record['quantity']=0.0
+        _logger.warning(f"Creando StockMove\nRecord: {record}\nValores: {vals}")
+        return record
