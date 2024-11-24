@@ -43,12 +43,6 @@ class SaleOrder(models.Model):
         compute='_compute_reservation_count',
         store=True
     )
-
-    material_reservation_locked = fields.Boolean(
-        string="Material Reservation Locked",
-        compute="_compute_material_reservation_locked",
-        store=True,
-    )
     
     # Computed Fields    
     @api.depends('sale_stock_link_id.picking_ids')
@@ -59,11 +53,7 @@ class SaleOrder(models.Model):
             else:
                 order.reservation_count = 0
 
-    @api.depends('state')
-    def _compute_material_reservation_locked(self):
-        """Bloquea la reserva de materiales si la orden está bloqueada."""
-        for order in self:
-            order.material_reservation_locked = order.state in ['done', 'cancel']
+    
 
     @api.depends('material_reservation_ids.product_uom_qty', 'picking_ids.state')
     def _compute_material_reservation_status(self):
@@ -144,6 +134,16 @@ class SaleOrder(models.Model):
             raise UserError("No hay productos en la reserva de materiales.")
        
         picking = self._create_material_reservation_picking()
+
+        # Crea la transferencia de salida utilizando el almacén seleccionado
+        picking_type = self._get_picking_type()
+
+        # Revisa si se encontró un tipo de picking para el almacén especificado
+        if not picking_type:
+            raise ValueError("No se encontró un tipo de albarán de salida para el almacén seleccionado.")
+
+        self._add_moves_to_picking(picking,picking_type)
+
         #picking['has_reservation']=1
 
         # Verificar si ya se generó la reserva de materiales
@@ -178,15 +178,9 @@ class SaleOrder(models.Model):
         return picking_type
 
     def _create_material_reservation_picking(self):
-
         # Crea la transferencia de salida utilizando el almacén seleccionado
         picking_type = self._get_picking_type()
 
-        # Revisa si se encontró un tipo de picking para el almacén especificado
-        if not picking_type:
-            raise ValueError("No se encontró un tipo de albarán de salida para el almacén seleccionado.")
-        
-        
         # Crear el picking (transferencia) con el almacén definido        
         picking = self.env['stock.picking'].create({
             'partner_id': self.partner_id.id,
@@ -206,26 +200,12 @@ class SaleOrder(models.Model):
 
         ##_logger.warning(f"Transferencia: {picking} \nTipo de transferencia: {picking_type}  \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
         
-        
-
-        self._add_moves_to_picking(picking,picking_type)
         #picking['has_reservation']=True
         return picking
         # Part of Odoo. See LICENSE file for full copyright and licensing details.
 
     def _add_moves_to_picking(self,picking,picking_type):
         """Agrega movimientos al picking basado en las líneas de reserva de materiales."""
-
-        """
-        # Verificar si existe el procurement_group_id, si no, crearlo
-        if not self.procurement_group_id:
-            self.procurement_group_id = self.env['procurement.group'].create({
-                'name': self.name,
-                'sale_id': self.id,
-                'partner_id': self.partner_id.id,
-            })
-        """    
-
         
         move_ids = []
         # Lógica para agregar líneas a la reserva de materiales
@@ -234,7 +214,7 @@ class SaleOrder(models.Model):
             move = self.env['stock.move'].create({
                 'name': line.name or line.product_id.name,
                 'product_id': line.product_id.id,
-                'product_uom_qty': line.product_uom_qty,
+                'product_uom_qty': line.qty_pending,
                 'product_uom': line.product_uom.id,
                 'location_id': picking_type.default_location_src_id.id,
                 'location_dest_id': self.partner_id.property_stock_customer.id,
@@ -257,178 +237,120 @@ class SaleOrder(models.Model):
         picking['move_ids_without_package'] = [Command.clear(), Command.set(move_ids)]
                 
 
-    @api.onchange('material_reservation_ids')
-    def _onchange_material_reservation_ids(self):
-        #_logger.warning("Iniciando actualización de las cantidades de las líneas en la transferencia.\n _onchange_material_reservation_ids")
-        
-        # Filtrar solo las transferencias con reservas
-        pickings = self.picking_ids.filtered(lambda p: p.has_reservation)
     
-        # Verificar si hay transferencias con reservas
-        if pickings:
-            for picking in pickings:
-                #_logger.warning(f"Actualizando picking con ID {picking.id} que tiene reservas.")
-                
-                # Iterar a través de las líneas de reserva en material_reservation_ids
-                for reservation_line in self.material_reservation_ids:
-                    # Buscar la línea de stock.move correspondiente en la transferencia
-                    matching_move_line = picking.move_ids_without_package.filtered(
-                        lambda move: move.reservation_line_id.id == reservation_line._origin.id
-                    )
-    
-                    # Si existe una línea de stock.move que coincide, actualizamos la cantidad
-                    if matching_move_line:
-                        #_logger.warning(f"Actualizando cantidad en la línea de picking para el producto {reservation_line.product_id.name}\n matching_move_line: {matching_move_line}")
-
-                        # Actualizo la cantidad en la linea correspondiente
-                        self.env['stock.move'].browse(matching_move_line._origin.id).product_uom_qty = reservation_line.product_uom_qty
-                
-                    else:
-                        _logger.warning(f"No se encontró una línea en la transferencia que corresponda a la reserva con ID {reservation_line.id}.")
-        else:
-            _logger.warning("No hay transferencias que tengan reservas.")
 
 
-    
-    
 
 
 class SaleOrderMaterialReservationLine(models.Model):
     _name = 'sale.order.material.reservation.line'
     _description = 'Sale Order Material Reservation Line'
 
+    # Campos principales
     name = fields.Text(
-    string="Description",
-    store=True, readonly=False, required=False,
-    compute='_compute_name'
+        string="Description",
+        compute='_compute_name',
+        store=True
     )
-
     qty_pending = fields.Float(
         string="Pending Quantity", 
         compute="_compute_qty_pending", 
         store=True
     )
-
-    
-    # Nuevo campo para las cantidades realizadas
-    qty_done = fields.Float(string="Done Quantity", readonly=True, default=0.0)
-    
-    picking_id = fields.Many2one('stock.picking', string='Picking')
-
-    move_ids = fields.One2many('stock.move', 'reservation_line_id', string='Stock Moves')
-    
-    order_id = fields.Many2one('sale.order', string="Order", ondelete="cascade",required=True)
-    # Order-related fields
-    company_id = fields.Many2one(
-        related='order_id.company_id',
-        store=True, index=True, precompute=True)
-    
-    currency_id = fields.Many2one(
-        related='order_id.currency_id',
-        depends=['order_id.currency_id'],
-        store=True, precompute=True)
-    
-    order_partner_id = fields.Many2one(
-        related='order_id.partner_id',
-        string="Customer",
-        store=True, index=True, precompute=True)
-    
-    salesman_id = fields.Many2one(
-        related='order_id.user_id',
-        string="Salesperson",
-        store=True, precompute=True)
-    
-    state = fields.Selection(
-        related='order_id.state',
-        string="Order Status",
-        copy=False, store=True, precompute=True)
-    
-    tax_country_id = fields.Many2one(related='order_id.tax_country_id')
-
-
-    # Fields specifying custom line logic
-    display_type = fields.Selection(
-        selection=[
-            ('line_section', "Section"),
-            ('line_note', "Note"),
-        ],
-        default=False)
-
-        
-    product_id = fields.Many2one('product.product', string="Product", required=True)
-    
-    product_uom_qty = fields.Float(string="Quantity", default=1.0, required=True)
-    #product_uom_category_id = fields.Many2one(related='product_id.uom_id.category_id', depends=['product_id'])
+    qty_done = fields.Float(
+        string="Done Quantity", 
+        readonly=True, 
+        default=0.0
+    )
+    picking_id = fields.Many2one(
+        'stock.picking', 
+        string='Picking'
+    )
+    move_ids = fields.One2many(
+        'stock.move', 
+        'reservation_line_id', 
+        string='Stock Moves'
+    )
+    order_id = fields.Many2one(
+        'sale.order', 
+        string="Order", 
+        ondelete="cascade", 
+        required=True
+    )
+    product_id = fields.Many2one(
+        'product.product', 
+        string="Product", 
+        required=True
+    )
+    product_uom_qty = fields.Float(
+        string="Quantity", 
+        default=1.0, 
+        required=True
+    )
     
     product_uom = fields.Many2one(
         comodel_name='uom.uom',
         string="Unit of Measure",
         compute='_compute_product_uom',
-        store=True, readonly=False, precompute=True, ondelete='restrict')
+        store=True,
+        readonly=False
+    )
     
-    price_unit = fields.Float(string="Unit Price")
+    price_unit = fields.Float(
+        string="Unit Price"
+    )
     
-    tax_ids = fields.Many2many('account.tax', string="Taxes")
-    
+    subtotal = fields.Float(
+        string="Subtotal (w/o taxes)", 
+        compute='_compute_subtotal', 
+        store=True
+    )
+
     availability = fields.Float(string="Availability", readonly=True)
 
-    
-    subtotal = fields.Float(string="Subtotal (w/o taxes)", readonly=True)
+    # Related fields
+    company_id = fields.Many2one(related='order_id.company_id', store=True, index=True)
 
+    @api.model
+    def create(self, vals):
+        record = super().create(vals)
+        _logger.info(f"Creando línea de reserva: {record.name} con datos: {vals}")
+        record._compute_qty_pending()
+        if record.order_id.state == 'sale' and record.qty_pending > 0:
+            self._handle_material_reservation([record])
+        return record
 
-
-    def write(self, vals):
-        #_logger.warning(f"Entrando en write de la linea de reserva. Valores: {vals}")
-        res = super(SaleOrderMaterialReservationLine, self).write(vals)
+    @api.model
+    def unlink(self):
         for line in self:
-            # Verificar si se está cambiando la cantidad
-            if 'product_uom_qty' in vals:
-                new_qty = vals['product_uom_qty']
-                if new_qty < line.qty_done:
-                    raise UserError("No puedes reducir la cantidad por debajo de la cantidad hecha.")
+            if line.move_ids.filtered(lambda m: m.state not in ("done", "cancel")):
+                raise UserError(_("No se puede eliminar esta línea ya que está asociada con una transacción."))
+        return super().unlink()
 
-                #_logger.warning(f"linea {line} - {line.picking_id}")
-                #_logger.warning(f"Orden de venta {self.order_id}")
-                pickings = self.order_id.sale_stock_link_id.picking_ids
-                #_logger.warning(f"pickings: {pickings}")
-                # Actualizar transacciones relacionadas
-                if pickings:
-                    filtered_pickings=pickings.move_ids.filtered(lambda m: m.state not in ('done', 'cancel'))
-                    if filtered_pickings:
-                        for move in filtered_pickings:
-                            #_logger.warning(f"movimiento {move}")
-                            # Actualizar la demanda si coincide con la línea de reserva
-                            if move.reservation_line_id == line:
-                                #_logger.warning(f"linea de reserva {move.reservation_line_id} - {line}")
-                                remaining_qty = new_qty - line.qty_done
-                                move.product_uom_qty = max(0, remaining_qty)
-                                
-                                # Cancelar movimiento si la demanda es 0
-                                if move.product_uom_qty == 0:
-                                    move.state = 'cancel'
-    
-                        # Cancelar la transacción si todas las demandas son 0
-                        if all(m.product_uom_qty == 0 for m in line.picking_id.move_ids):
-                            line.picking_id.state = 'cancel'
-                else:
-                    _logger.warning(f"no hay transacciones pendientes")
-                    #No hay ordenes pendientes
-                    
+    @api.model
+    def write(self, vals):
+        res = super().write(vals)
+        updated_lines = []
+        for line in self:
+            if 'product_uom_qty' in vals:
+                if vals['product_uom_qty'] < line.qty_done:
+                    raise UserError(_("No puedes establecer una cantidad menor a la hecha."))
+                line.qty_pending = max(0, vals['product_uom_qty'] - line.qty_done)
+                updated_lines.append(line)
+
+        if updated_lines:
+            self._handle_material_reservation(updated_lines)
         return res
 
-    
     @api.depends('product_uom_qty', 'qty_done')
     def _compute_qty_pending(self):
         for line in self:
             line.qty_pending = max(0, line.product_uom_qty - line.qty_done)
 
-    
     @api.depends('product_id')
     def _compute_product_uom(self):
         for line in self:
-            if not line.product_uom or (line.product_id.uom_id.id != line.product_uom.id):
-                line.product_uom = line.product_id.uom_id
-
+            line.product_uom = line.product_id.uom_id
 
     @api.depends('order_id', 'product_id')
     def _compute_name(self):
@@ -442,11 +364,102 @@ class SaleOrderMaterialReservationLine(models.Model):
             else:
                 line.name = "No Description"
 
-
     @api.depends('price_unit', 'product_uom_qty')
-    def _update_subtotal(self):
+    def _compute_subtotal(self):
         for line in self:
-            line['subtotal']=line.price_unit * line.product_uom_qty
-        
+            line.subtotal = line.price_unit * line.product_uom_qty
 
+    def _handle_material_reservation(self, lines):
+        """Handle creation or update of material reservations for multiple lines."""
+        # Obtener las órdenes asociadas a las líneas.
+        orders = {line.order_id for line in lines}
     
+        for order in orders:
+            # Filtrar pickings existentes que puedan ser reutilizados.
+            pickings = order.sale_stock_link_id.picking_ids.filtered(
+                lambda p: p.state not in ('done', 'cancel')
+            )
+    
+            reusable_picking = pickings[:1]  # Tomar el primero válido si existe.
+            lines_with_pending_qty = [line for line in lines if line.qty_pending > 0]
+    
+            if reusable_picking:
+                # Actualizar o agregar movimientos a un picking existente.
+                for line in lines_with_pending_qty:
+                    self._add_or_update_moves_in_picking(line, reusable_picking)
+                    if reusable_picking.state == "draft":
+                        reusable_picking.action_confirm()
+                _logger.info(f"Movimientos actualizados o agregados al picking existente {reusable_picking.id}.")
+            else:
+                # Crear un nuevo picking y asignar movimientos.
+                new_picking = self._create_new_picking_for_lines(order, lines_with_pending_qty)
+                new_picking.action_confirm()
+                _logger.info(f"Nuevo picking creado con ID {new_picking.id} para las líneas: {lines_with_pending_qty}.")
+
+
+    def _add_or_update_moves_in_picking(self, line, picking):
+        """Add or update stock moves in an existing picking."""
+        existing_moves = picking.move_ids_without_package.filtered(
+            lambda m: m.reservation_line_id == line and m.state not in ('done', 'cancel')
+        )
+        if existing_moves:
+            for move in existing_moves:
+                move.product_uom_qty = max(0, line.qty_pending)
+                if move.product_uom_qty == 0:
+                    move.state = 'cancel'
+            _logger.info(f"Movimientos actualizados en el picking {picking.id} para la línea {line.name}")
+        elif line.qty_pending > 0:
+            # Reactivar o agregar un nuevo movimiento
+            new_move = self.env['stock.move'].create({
+                'name': line.product_id.name,
+                'product_id': line.product_id.id,
+                'product_uom_qty': line.qty_pending,
+                'product_uom': line.product_uom.id,
+                'location_id': picking.picking_type_id.default_location_src_id.id,
+                'location_dest_id': picking.location_dest_id.id,
+                'picking_id': picking.id,
+                'company_id': line.company_id.id,
+                'reservation_line_id': line.id,
+            })
+            _logger.info(f"Nuevo movimiento creado en el picking {picking.id} para la línea {line.name}: {new_move}")
+
+    def _create_new_material_reservation(self, line):
+        """Create a new picking for the material reservation."""
+        sale_order = line.order_id
+        if hasattr(sale_order, '_create_material_reservation_picking'):
+            new_picking = sale_order._create_material_reservation_picking()
+            new_move = self.env['stock.move'].create({
+                'name': line.product_id.name,
+                'product_id': line.product_id.id,
+                'product_uom_qty': line.qty_pending,
+                'product_uom': line.product_uom.id,
+                'location_id': new_picking.picking_type_id.default_location_src_id.id,
+                'location_dest_id': new_picking.location_dest_id.id,
+                'picking_id': new_picking.id,
+                'company_id': line.company_id.id,
+                'reservation_line_id': line.id,
+            })
+            _logger.info(f"Nuevo picking creado (ID {new_picking.id}) con movimiento {new_move.id} para la línea {line.name}")
+
+
+    def _create_new_picking_for_lines(self, order, lines):
+        """Create a new picking for a set of lines with pending quantities."""
+        new_picking = order._create_material_reservation_picking()
+    
+        for line in lines:
+            self.env['stock.move'].create({
+                'name': line.product_id.name,
+                'product_id': line.product_id.id,
+                'product_uom_qty': line.qty_pending,
+                'product_uom': line.product_uom.id,
+                'location_id': new_picking.picking_type_id.default_location_src_id.id,
+                'location_dest_id': new_picking.location_dest_id.id,
+                'picking_id': new_picking.id,
+                'company_id': line.company_id.id,
+                'reservation_line_id': line.id,
+            })
+        return new_picking
+
+
+
+
