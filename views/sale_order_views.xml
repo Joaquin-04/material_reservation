@@ -19,14 +19,24 @@
                 <page string="Reserva de Materiales">                    
 
                     <!-- Vista de líneas de reserva de materiales -->
-                    <field name="material_reservation_ids" context="{'default_order_id': active_id}">
+                    <field name="x_studio_nv_numero_de_obra_relacionada" invisible="1"/>
+                    <field name="state" invisible="1"/>
+                    <field name="material_reservation_ids" context="{'default_order_id': active_id,'default_project_number': x_studio_nv_numero_de_obra_relacionada, 'sale_order_state': state}">
                         <tree editable="bottom">
-                            <field name="product_id" string="Producto"/>
+                            <field name="product_id" 
+                               readonly="id != False and context.get('sale_order_state') == 'sale'"
+                               />
+
                             <field name="product_uom_qty" string="Cantidad"/>
                             <field name="qty_done" readonly="1" string="Hechas"/>
                             <field name="product_uom" string ="UdM" readonly="1"/>
                             <field name="availability" widget="availability" readonly="1" string="Disponibilidad"/>
+                            <!-- Nueva columna: Etapa 
+                            <field name="stage_id" string="Etapa"/>
+                            -->
                             
+                            <field name="stage_id" domain="[('project_number', '=', context.get('default_project_number'))]"/>
+
                         </tree>
                         
                         <!-- Formulario para editar líneas de reserva de material -->
@@ -37,7 +47,11 @@
                                 <field name="qty_done" readonly="1" string="Hechas"/>
                                 <field name="product_uom"/>
                                 <field name="availability" widget="availability" readonly="1" string="Disponibilidad"/>
-                                
+                                <!-- Campo de etapa 
+                                <field name="stage_id" string="Etapa"/>
+                                -->
+                                <field name="stage_id" domain="[('project_number', '=', context.get('default_project_number'))]"/>
+
                             </group>
                         </form>
                     </field>

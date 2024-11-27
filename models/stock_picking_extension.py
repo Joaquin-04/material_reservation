@@ -31,11 +31,22 @@ class StockPicking(models.Model):
 class StockMove(models.Model):
     _inherit = "stock.move"
 
+    stage_id = fields.Many2one(
+        'material.reservation.stage',
+        string="Etapa",
+        ondelete='set null',
+        required=False,
+        readonly=True,
+        help="Stage associated with the material reservation."
+    )
+
     sale_stock_link_id = fields.Many2one('sale.stock.link', string='Sale Stock Link')
     
     reservation_line_id = fields.Many2one('sale.order.material.reservation.line', 'Reservation Line')
     
     def _action_done(self, cancel_backorder=False):
+        _logger.warning(f"Entrando al _action_done de stock.Move")
+        """Actualiza las cantidades hechas en las líneas de reserva relacionadas."""
         for move in self:
             # Si hay una línea de reserva, realiza las actualizaciones
             if move.reservation_line_id:
@@ -50,10 +61,49 @@ class StockMove(models.Model):
 
     @api.model
     def create(self, vals):
+        _logger.warning(f"Entrando al create de Stock.Move\n valores {vals}")
+        # Si se proporciona una línea de reserva, hereda la etapa automáticamente.
+        if 'reservation_line_id' in vals and vals['reservation_line_id']:
+            reservation_line = self.env['sale.order.material.reservation.line'].browse(vals['reservation_line_id'])
+            vals['stage_id'] = reservation_line.stage_id.id
+
+        # Si hay un vínculo con SaleStockLink, pero sin línea de reserva, se verifica si es aplicable asignar una etapa.
+        elif 'sale_stock_link_id' in vals and vals['sale_stock_link_id']:
+            sale_stock_link = self.env['sale.stock.link'].browse(vals['sale_stock_link_id'])
+            _logger.warning(f"Tengo sale_stock_link: {sale_stock_link}")
+            if sale_stock_link.sale_order_id:
+                # Busca la línea de reserva asociada para este movimiento específico
+                reservations = sale_stock_link.sale_order_id.mapped('material_reservation_ids')
+                _logger.warning(f" reservations: {reservations}")
+                product_id = vals.get('product_id')
+                _logger.warning(f" product_id: {product_id}")
+                specific_reservations = reservations.filtered(lambda r: r.product_id.id == product_id)
+                _logger.warning(f" specific_reservations: {specific_reservations}")
+                if specific_reservations:
+                    vals['stage_id'] = specific_reservations[0].stage_id.id
+                    _logger.warning(f"Heredando etapa de la reserva específica para producto {product_id}: {specific_reservations[0].stage_id}")
+
+
+        
         # Si 'reservation_line_id' no está presente, no se fuerza su asignación
         vals['quantity'] = 0.0    # Cantidad hecha
         record = super().create(vals)
 
         record['quantity']=0.0
-        _logger.warning(f"Creando StockMove\nRecord: {record}\nValores: {vals}")
+        _logger.warning(f"StockMove creado con ID {record.id}, Stage: {record.stage_id}, Reservation Line: {record.reservation_line_id}")
         return record
+
+    
+
+    def write(self, vals):
+        # Actualiza la etapa si la línea de reserva cambia.
+        if 'reservation_line_id' in vals and vals['reservation_line_id']:
+            reservation_line = self.env['sale.order.material.reservation.line'].browse(vals['reservation_line_id'])
+            vals['stage_id'] = reservation_line.stage_id.id
+        return super().write(vals)
+
+
+
+
+
+

@@ -1,0 +1,31 @@
+<odoo>
+    <record id="view_material_reservation_stage_tree" model="ir.ui.view">
+        <field name="name">material.reservation.stage.tree</field>
+        <field name="model">material.reservation.stage</field>
+        <field name="arch" type="xml">
+            <tree>
+                <field name="name" string="Nombre de Etapa"/>
+                <field name="project_number" string="Número de Obra"/>
+                <field name="deadline_date" string="Fecha de Entrega"/>
+            </tree>
+        </field>
+    </record>
+
+    <record id="view_material_reservation_stage_form" model="ir.ui.view">
+        <field name="name">material.reservation.stage.form</field>
+        <field name="model">material.reservation.stage</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="name" string="Nombre de Etapa"/>
+                        <field name="project_number" string="Número de Obra" readonly="1" />
+                        <field name="deadline_date" string="Fecha de Entrega"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    
+</odoo>

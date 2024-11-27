@@ -43,6 +43,11 @@ class SaleOrder(models.Model):
         compute='_compute_reservation_count',
         store=True
     )
+
+    @api.onchange('x_studio_nv_numero_de_obra_relacionada')
+    def _onchange_project_number(self):
+        for reservation in self.material_reservation_ids:
+            reservation.stage_id = False  # Vacía la etapa cuando cambia el número de proyecto
     
     # Computed Fields    
     @api.depends('sale_stock_link_id.picking_ids')
@@ -165,6 +170,20 @@ class SaleOrder(models.Model):
         self._compute_material_reservation_status()  # Recalcula el estado de la reserva
 
 
+    def action_open_reservation_wizard(self):
+        return {
+            'name': 'Seleccionar Etapa para Reservas',
+            'type': 'ir.actions.act_window',
+            'res_model': 'reservation.report.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_project_number': self.x_studio_nv_numero_de_obra_relacionada
+            }
+        }
+
+    
+
     #helpers
     def _get_picking_type(self):
         """Retrieve the picking type for outgoing shipments based on the selected warehouse."""
@@ -236,11 +255,70 @@ class SaleOrder(models.Model):
         # Asigna los IDs al campo 'move_id_without_package' usando Command.clear y Command.set
         picking['move_ids_without_package'] = [Command.clear(), Command.set(move_ids)]
                 
-
     
+class MaterialReservationStage(models.Model):
+    _name = 'material.reservation.stage'
+    _description = 'Material Reservation Stage'
 
+    material_line = fields.One2many(
+        'sale.order.material.reservation.line','stage_id',
+        string="Linea de Material",
+        required=False,
+        help="material reservation associated with the Stage.",
+    )
 
+    name = fields.Char(string="Stage Name", required=True)
+    
+    project_number = fields.Integer(
+        string="Project Number", 
+        help="Related project number.",
+        compute="_compute_project_number",
+        store=True  # Este campo ahora será almacenado
+    )
+    deadline_date = fields.Date(
+        string="Delivery Deadline",
+        help="Deadline for delivering all materials for this stage."
+    )
 
+    @api.depends('material_line.order_id.x_studio_nv_numero_de_obra_relacionada')
+    def _compute_project_number(self):
+        for reservation in self:
+            _logger.warning(f"linea: {reservation.material_line} ")
+            obra_relacionada = (
+                reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
+            )
+            _logger.warning(f"obra {obra_relacionada} ")
+            if obra_relacionada:
+                # Verifica si hay múltiples números de obra y lanza un error
+                if len(set(obra_relacionada)) > 1:
+                    raise UserError("Hay múltiples números de obra relacionados en las líneas de material.")
+                reservation.project_number = obra_relacionada[0]
+            else:
+                reservation.project_number = False
+
+    """
+    _sql_constraints = [
+        (
+            'unique_stage_name_project',
+            'UNIQUE(name, project_number)',
+            'El nombre de la etapa debe ser único dentro del mismo número de proyecto.'
+        )
+    ]
+    
+    
+    @api.constrains('name', 'project_number')
+    def _check_unique_name_per_project(self):
+        for stage in self:
+            duplicates = self.search([
+                ('name', '=', stage.name),
+                ('project_number', '=', stage.project_number),
+                ('id', '!=', stage.id)
+            ])
+            if duplicates:
+                raise ValidationError(f"Ya existe una etapa con este nombre para el mismo número de proyecto.
+                \nnombre {name} - project_number")
+    """
+    
 
 class SaleOrderMaterialReservationLine(models.Model):
     _name = 'sale.order.material.reservation.line'
@@ -299,6 +377,22 @@ class SaleOrderMaterialReservationLine(models.Model):
     price_unit = fields.Float(
         string="Unit Price"
     )
+    stage_id = fields.Many2one(
+        'material.reservation.stage',
+        string="Etapa",
+        ondelete="set null",
+        required=False,
+        help="Stage associated with the material reservation.",
+        
+    )
+    
+    stage_deadline_date = fields.Date(
+        string="Stage Deadline",
+        related="stage_id.deadline_date",
+        store=True,
+        readonly=True,
+        help="Deadline for the stage associated with this reservation line."
+    )
     
     subtotal = fields.Float(
         string="Subtotal (w/o taxes)", 
@@ -329,6 +423,7 @@ class SaleOrderMaterialReservationLine(models.Model):
 
     @api.model
     def write(self, vals):
+        _logger.warning(f"Entrando en el write de Linea de Reserva ")
         res = super().write(vals)
         updated_lines = []
         for line in self:
@@ -336,10 +431,13 @@ class SaleOrderMaterialReservationLine(models.Model):
                 if vals['product_uom_qty'] < line.qty_done:
                     raise UserError(_("No puedes establecer una cantidad menor a la hecha."))
                 line.qty_pending = max(0, vals['product_uom_qty'] - line.qty_done)
+                _logger.warning(f"cantidad pendiente {line.qty_pending} para la linea: {line.name}")
                 updated_lines.append(line)
 
+        
         if updated_lines:
             self._handle_material_reservation(updated_lines)
+            _logger.warning(f"lineas_actualizadas {updated_lines}")
         return res
 
     @api.depends('product_uom_qty', 'qty_done')
@@ -369,7 +467,9 @@ class SaleOrderMaterialReservationLine(models.Model):
         for line in self:
             line.subtotal = line.price_unit * line.product_uom_qty
 
+    
     def _handle_material_reservation(self, lines):
+        _logger.warning(f"Entrando en _handle_material_reservation")
         """Handle creation or update of material reservations for multiple lines."""
         # Obtener las órdenes asociadas a las líneas.
         orders = {line.order_id for line in lines}
@@ -381,7 +481,7 @@ class SaleOrderMaterialReservationLine(models.Model):
             )
     
             reusable_picking = pickings[:1]  # Tomar el primero válido si existe.
-            lines_with_pending_qty = [line for line in lines if line.qty_pending > 0]
+            lines_with_pending_qty = [line for line in lines if line.qty_pending >= 0]
     
             if reusable_picking:
                 # Actualizar o agregar movimientos a un picking existente.
@@ -392,18 +492,28 @@ class SaleOrderMaterialReservationLine(models.Model):
                 _logger.info(f"Movimientos actualizados o agregados al picking existente {reusable_picking.id}.")
             else:
                 # Crear un nuevo picking y asignar movimientos.
+                all_lines = self.env['sale.order'].browse(lines[0].order_id.id).material_reservation_ids
+                _logger.warning(f"Todas las lineas {all_lines}")
+                lines_with_pending_qty = [line for line in all_lines if line.qty_pending>=0]
+                _logger.warning(f"lineas con cant pendientes {lines_with_pending_qty}")
+                #raise UserError(f"Lineas papa")
                 new_picking = self._create_new_picking_for_lines(order, lines_with_pending_qty)
                 new_picking.action_confirm()
                 _logger.info(f"Nuevo picking creado con ID {new_picking.id} para las líneas: {lines_with_pending_qty}.")
 
 
     def _add_or_update_moves_in_picking(self, line, picking):
+        _logger.warning(f"Entrando en _add_or_update_moves_in_picking")
         """Add or update stock moves in an existing picking."""
-        existing_moves = picking.move_ids_without_package.filtered(
-            lambda m: m.reservation_line_id == line and m.state not in ('done', 'cancel')
+        all_moves = picking.move_ids_without_package.filtered(lambda m: m.state not in ('done', 'cancel'))
+        existing_moves = all_moves.filtered(
+            lambda m: m.reservation_line_id == line
         )
+        move_ids=[m.id for m in all_moves]
+        _logger.warning(f"movimientos existentes: {existing_moves}\n Todos los movimientos: {all_moves}")
         if existing_moves:
             for move in existing_moves:
+                _logger.warning(f"movimiente {move.name}")
                 move.product_uom_qty = max(0, line.qty_pending)
                 if move.product_uom_qty == 0:
                     move.state = 'cancel'
@@ -419,15 +529,31 @@ class SaleOrderMaterialReservationLine(models.Model):
                 'location_dest_id': picking.location_dest_id.id,
                 'picking_id': picking.id,
                 'company_id': line.company_id.id,
+                'date': fields.Datetime.now(),
+                'state': 'assigned',  # Estado de movimiento asignado
                 'reservation_line_id': line.id,
+                'sale_stock_link_id':line.order_id.sale_stock_link_id.id,
+                # Asegúrate de no establecer el sale_line_id
+                'sale_line_id': False,
             })
-            _logger.info(f"Nuevo movimiento creado en el picking {picking.id} para la línea {line.name}: {new_move}")
+            # Agrego la relacion de la linea de movimiento con la linea de la reserva
+            line.move_ids = new_move
+            # Añadir el ID del movimiento a la lista
+            move_ids.append(new_move.id)
 
-    def _create_new_material_reservation(self, line):
-        """Create a new picking for the material reservation."""
-        sale_order = line.order_id
-        if hasattr(sale_order, '_create_material_reservation_picking'):
-            new_picking = sale_order._create_material_reservation_picking()
+            #raise UserError(f"movimientos: {move_ids}  relacion de la linea {line.name} con el movimiento {line.move_ids}")
+            # Asigna los IDs al campo 'move_id_without_package' usando Command.clear y Command.set
+            picking['move_ids_without_package'] = [Command.clear(), Command.set(move_ids)]
+            #_logger.warning(f"Nuevo movimiento creado en el picking {picking.id} para la línea {line.name}: {new_move}")
+
+    
+
+    def _create_new_picking_for_lines(self, order, lines):
+        _logger.warning(f"****Entrando en _create_new_picking_for_lines")
+        """Create a new picking for a set of lines with pending quantities."""
+        new_picking = order._create_material_reservation_picking()
+        move_ids=[]
+        for line in lines:
             new_move = self.env['stock.move'].create({
                 'name': line.product_id.name,
                 'product_id': line.product_id.id,
@@ -437,29 +563,42 @@ class SaleOrderMaterialReservationLine(models.Model):
                 'location_dest_id': new_picking.location_dest_id.id,
                 'picking_id': new_picking.id,
                 'company_id': line.company_id.id,
+                'date': fields.Datetime.now(),
+                'state': 'assigned',  # Estado de movimiento asignado
                 'reservation_line_id': line.id,
+                'sale_stock_link_id':line.order_id.sale_stock_link_id.id,
+                # Asegúrate de no establecer el sale_line_id
+                'sale_line_id': False,
             })
-            _logger.info(f"Nuevo picking creado (ID {new_picking.id}) con movimiento {new_move.id} para la línea {line.name}")
-
-
-    def _create_new_picking_for_lines(self, order, lines):
-        """Create a new picking for a set of lines with pending quantities."""
-        new_picking = order._create_material_reservation_picking()
-    
-        for line in lines:
-            self.env['stock.move'].create({
-                'name': line.product_id.name,
-                'product_id': line.product_id.id,
-                'product_uom_qty': line.qty_pending,
-                'product_uom': line.product_uom.id,
-                'location_id': new_picking.picking_type_id.default_location_src_id.id,
-                'location_dest_id': new_picking.location_dest_id.id,
-                'picking_id': new_picking.id,
-                'company_id': line.company_id.id,
-                'reservation_line_id': line.id,
-            })
+            # Agrego la relacion de la linea de movimiento con la linea de la reserva
+            line.move_ids = new_move
+            # Añadir el ID del movimiento a la lista
+            move_ids.append(new_move.id)
+        
+        new_picking['move_ids_without_package'] = [Command.clear(), Command.set(move_ids)]
+        
         return new_picking
 
+    # Constrains
+
+    @api.constrains('product_id', 'stage_id')
+    def _check_duplicate_product_stage(self):
+        #_logger.warning(f"Entrando a _check_duplicate_product_stage")
+        for line in self:
+            lineas_without_me = self.search([
+                ('id', '!=', line.id),
+                ('order_id', '=', line.order_id.id)
+            ])
+            lineas_without_me = [(l.stage_id.name ,l.product_id.name) for l in lineas_without_me]
+            #_logger.warning(f"lineas_without_me: {lineas_without_me}")
+            duplicates=[]
+            if (line.stage_id.name,line.product_id.name) in lineas_without_me:
+                duplicates.append(line.id)
+            else:
+                _logger.warning(f"La linea {line.name} - etapa  {line.stage_id.name} no esta duplicada")
+            
+            if duplicates:
+                raise ValidationError(_(f"No puedes agregar el mismo producto con la misma etapa."))
 
 
 
