@@ -105,5 +105,3 @@ class StockMove(models.Model):
 
 
 
-
-

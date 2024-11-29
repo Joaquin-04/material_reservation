@@ -113,10 +113,11 @@ class SaleOrder(models.Model):
         return action
 
     def action_confirm(self):
+        # Pongo el almacen por defecto de odoo igual al almacen que cree yo
+        self['warehouse_id'] = self.studio_almacen.id
         res = super(SaleOrder, self).action_confirm()
         # Crear transferencia de reserva de materiales si hay productos
         #if self.material_reservation_ids and not self.material_reservation_picking_generated:
-
 
         # Crear o asociar el SaleStockLink
         if not self.sale_stock_link_id:
@@ -357,11 +358,11 @@ class SaleOrderMaterialReservationLine(models.Model):
     )
     product_id = fields.Many2one(
         'product.product', 
-        string="Product", 
+        string="Producto", 
         required=True
     )
     product_uom_qty = fields.Float(
-        string="Quantity", 
+        string="Cantidad", 
         default=1.0, 
         required=True
     )
@@ -380,10 +381,8 @@ class SaleOrderMaterialReservationLine(models.Model):
     stage_id = fields.Many2one(
         'material.reservation.stage',
         string="Etapa",
-        ondelete="set null",
-        required=False,
-        help="Stage associated with the material reservation.",
-        
+        required=True,
+        help="Stage associated with the material reservation.",   
     )
     
     stage_deadline_date = fields.Date(

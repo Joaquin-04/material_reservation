@@ -6,7 +6,8 @@
         <field name="inherit_id" ref="sale.view_order_form"/>
         <field name="arch" type="xml">
         <xpath expr="//field[@name='payment_term_id']" position="after">
-                <field name="studio_almacen"/>
+                <field name="state" invisible="1"/>
+                <field name="studio_almacen" readonly="state == 'sale'"/>
             </xpath>
             <xpath expr="//div[@name='button_box']" position="inside">
                 <button type="object" name="action_view_reservations"
