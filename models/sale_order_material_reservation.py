@@ -591,7 +591,7 @@ class SaleOrderMaterialReservationLine(models.Model):
             lineas_without_me = [(l.stage_id.name ,l.product_id.name) for l in lineas_without_me]
             #_logger.warning(f"lineas_without_me: {lineas_without_me}")
             duplicates=[]
-            if (line.stage_id.name,line.product_id.name) in lineas_without_me:
+            if (line.stage_id.id,line.product_id.id) in lineas_without_me:
                 duplicates.append(line.id)
             else:
                 _logger.warning(f"La linea {line.name} - etapa  {line.stage_id.name} no esta duplicada")
