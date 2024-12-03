@@ -103,6 +103,8 @@ class SaleOrder(models.Model):
         return default_warehouse.id if default_warehouse else False
 
 
+        
+    
     # Actions
     
     def action_view_reservations(self):
@@ -297,28 +299,7 @@ class MaterialReservationStage(models.Model):
             else:
                 reservation.project_number = False
 
-    """
-    _sql_constraints = [
-        (
-            'unique_stage_name_project',
-            'UNIQUE(name, project_number)',
-            'El nombre de la etapa debe ser único dentro del mismo número de proyecto.'
-        )
-    ]
     
-    
-    @api.constrains('name', 'project_number')
-    def _check_unique_name_per_project(self):
-        for stage in self:
-            duplicates = self.search([
-                ('name', '=', stage.name),
-                ('project_number', '=', stage.project_number),
-                ('id', '!=', stage.id)
-            ])
-            if duplicates:
-                raise ValidationError(f"Ya existe una etapa con este nombre para el mismo número de proyecto.
-                \nnombre {name} - project_number")
-    """
     
 
 class SaleOrderMaterialReservationLine(models.Model):
@@ -478,6 +459,8 @@ class SaleOrderMaterialReservationLine(models.Model):
             pickings = order.sale_stock_link_id.picking_ids.filtered(
                 lambda p: p.state not in ('done', 'cancel')
             )
+            # Filtro por todos los pickings de tipo salida, excluyo los de tipo devolucion ( incoming )
+            pickings = pickings.filtered( lambda p:p.picking_type_code in ('outgoing'))
     
             reusable_picking = pickings[:1]  # Tomar el primero válido si existe.
             lines_with_pending_qty = [line for line in lines if line.qty_pending >= 0]
