@@ -168,7 +168,7 @@ class SaleOrder(models.Model):
 
         #_logger.warning(f"Transferencia: {picking} \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
         
-        self.delivery_count += 1  # Actualiza el contador de reserva
+        #self.delivery_count += 1  # Actualiza el contador de reserva
         
         self._compute_material_reservation_status()  # Recalcula el estado de la reserva
 
