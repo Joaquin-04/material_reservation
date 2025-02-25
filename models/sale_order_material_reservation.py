@@ -46,6 +46,7 @@ class SaleOrder(models.Model):
 
     @api.onchange('x_studio_nv_numero_de_obra_relacionada')
     def _onchange_project_number(self):
+        #_logger.warning("Entre al onchange de obra_relacionada")
         for reservation in self.material_reservation_ids:
             reservation.stage_id = False  # Vacía la etapa cuando cambia el número de proyecto
     
@@ -115,6 +116,21 @@ class SaleOrder(models.Model):
         return action
 
     def action_confirm(self):
+        # Validar que todas las líneas de reserva de materiales tengan un stage_id
+        missing_stage_lines = self.material_reservation_ids.filtered(lambda l: not l.stage_id)
+
+        if missing_stage_lines:
+            # Construir un mensaje con los productos o descripciones de las líneas sin etapa
+            missing_info = "\n".join(
+                [f"- Producto: {line.product_id.display_name}" for line in missing_stage_lines]
+            )
+            raise exceptions.UserError(
+                "No se puede confirmar la orden porque hay reservas de materiales sin una etapa asignada. "
+                "Por favor, revisa las siguientes líneas:\n" + missing_info
+            )
+
+
+
         # Pongo el almacen por defecto de odoo igual al almacen que cree yo
         self['warehouse_id'] = self.studio_almacen.id
         res = super(SaleOrder, self).action_confirm()
@@ -168,7 +184,7 @@ class SaleOrder(models.Model):
 
         #_logger.warning(f"Transferencia: {picking} \n Viene de una reserva?: {picking.has_reservation} \nGrupo {self.procurement_group_id} {self.procurement_group_id.id} - {picking.group_id}")
         
-        self.delivery_count += 1  # Actualiza el contador de reserva
+        #self.delivery_count += 1  # Actualiza el contador de reserva
         
         self._compute_material_reservation_status()  # Recalcula el estado de la reserva
 
@@ -286,11 +302,11 @@ class MaterialReservationStage(models.Model):
     @api.depends('material_line.order_id.x_studio_nv_numero_de_obra_relacionada')
     def _compute_project_number(self):
         for reservation in self:
-            #_logger.warning(f"linea: {reservation.material_line} ")
+            _logger.warning(f"linea: {reservation.material_line} ")
             obra_relacionada = (
                 reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
             )
-            #_logger.warning(f"obra {obra_relacionada} ")
+            _logger.warning(f"obra {obra_relacionada} ")
             if obra_relacionada:
                 # Verifica si hay múltiples números de obra y lanza un error
                 if len(set(obra_relacionada)) > 1:
@@ -299,8 +315,21 @@ class MaterialReservationStage(models.Model):
             else:
                 reservation.project_number = False
 
+    @api.model
+    def create(self, vals):
+        record = super().create(vals)
+        #_logger.warning(f"Etapa: {record.name} con datos: {vals}")
+        #_logger.warning(f"Numero de la obra papa: {record.material_line.order_id.x_studio_nv_numero_de_obra_relacionada}")
+
+        record.project_number=record.material_line.order_id.x_studio_nv_numero_de_obra_relacionada
+        
+        return record
+
+
     
-    
+
+
+
 
 class SaleOrderMaterialReservationLine(models.Model):
     _name = 'sale.order.material.reservation.line'
@@ -403,7 +432,7 @@ class SaleOrderMaterialReservationLine(models.Model):
 
     @api.model
     def write(self, vals):
-        #_logger.warning(f"Entrando en el write de Linea de Reserva ")
+        _logger.warning(f"Entrando en el write de Linea de Reserva ")
         res = super().write(vals)
         updated_lines = []
         for line in self:
@@ -411,13 +440,13 @@ class SaleOrderMaterialReservationLine(models.Model):
                 if vals['product_uom_qty'] < line.qty_done:
                     raise UserError(_("No puedes establecer una cantidad menor a la hecha."))
                 line.qty_pending = max(0, vals['product_uom_qty'] - line.qty_done)
-                #_logger.warning(f"cantidad pendiente {line.qty_pending} para la linea: {line.name}")
+                _logger.warning(f"cantidad pendiente {line.qty_pending} para la linea: {line.name}")
                 updated_lines.append(line)
 
         
         if updated_lines:
             self._handle_material_reservation(updated_lines)
-            #_logger.warning(f"lineas_actualizadas {updated_lines}")
+            _logger.warning(f"lineas_actualizadas {updated_lines}")
         return res
 
     @api.depends('product_uom_qty', 'qty_done')
@@ -449,7 +478,7 @@ class SaleOrderMaterialReservationLine(models.Model):
 
     
     def _handle_material_reservation(self, lines):
-        #_logger.warning(f"Entrando en _handle_material_reservation")
+        _logger.warning(f"Entrando en _handle_material_reservation")
         """Handle creation or update of material reservations for multiple lines."""
         # Obtener las órdenes asociadas a las líneas.
         orders = {line.order_id for line in lines}
@@ -475,9 +504,9 @@ class SaleOrderMaterialReservationLine(models.Model):
             else:
                 # Crear un nuevo picking y asignar movimientos.
                 all_lines = self.env['sale.order'].browse(lines[0].order_id.id).material_reservation_ids
-                #_logger.warning(f"Todas las lineas {all_lines}")
+                _logger.warning(f"Todas las lineas {all_lines}")
                 lines_with_pending_qty = [line for line in all_lines if line.qty_pending>=0]
-                #_logger.warning(f"lineas con cant pendientes {lines_with_pending_qty}")
+                _logger.warning(f"lineas con cant pendientes {lines_with_pending_qty}")
                 #raise UserError(f"Lineas papa")
                 new_picking = self._create_new_picking_for_lines(order, lines_with_pending_qty)
                 new_picking.action_confirm()
@@ -485,17 +514,17 @@ class SaleOrderMaterialReservationLine(models.Model):
 
 
     def _add_or_update_moves_in_picking(self, line, picking):
-        #_logger.warning(f"Entrando en _add_or_update_moves_in_picking")
+        _logger.warning(f"Entrando en _add_or_update_moves_in_picking")
         """Add or update stock moves in an existing picking."""
         all_moves = picking.move_ids_without_package.filtered(lambda m: m.state not in ('done', 'cancel'))
         existing_moves = all_moves.filtered(
             lambda m: m.reservation_line_id == line
         )
         move_ids=[m.id for m in all_moves]
-        #_logger.warning(f"movimientos existentes: {existing_moves}\n Todos los movimientos: {all_moves}")
+        _logger.warning(f"movimientos existentes: {existing_moves}\n Todos los movimientos: {all_moves}")
         if existing_moves:
             for move in existing_moves:
-                #_logger.warning(f"movimiente {move.name}")
+                _logger.warning(f"movimiente {move.name}")
                 move.product_uom_qty = max(0, line.qty_pending)
                 if move.product_uom_qty == 0:
                     move.state = 'cancel'
@@ -531,7 +560,7 @@ class SaleOrderMaterialReservationLine(models.Model):
     
 
     def _create_new_picking_for_lines(self, order, lines):
-        #_logger.warning(f"****Entrando en _create_new_picking_for_lines")
+        _logger.warning(f"****Entrando en _create_new_picking_for_lines")
         """Create a new picking for a set of lines with pending quantities."""
         new_picking = order._create_material_reservation_picking()
         move_ids=[]

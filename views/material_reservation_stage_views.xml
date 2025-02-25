@@ -1,5 +1,5 @@
 <odoo>
-    <!-- Vista de lista para material.reservation.stage -->
+    <!-- Vista en árbol -->
     <record id="view_material_reservation_stage_tree" model="ir.ui.view">
         <field name="name">material.reservation.stage.tree</field>
         <field name="model">material.reservation.stage</field>
@@ -12,7 +12,7 @@
         </field>
     </record>
 
-    <!-- Vista de formulario para material.reservation.stage -->
+    <!-- Vista en formulario -->
     <record id="view_material_reservation_stage_form" model="ir.ui.view">
         <field name="name">material.reservation.stage.form</field>
         <field name="model">material.reservation.stage</field>
@@ -20,44 +20,26 @@
             <form>
                 <sheet>
                     <group>
-                        <field name="id" string="ID" readonly="1" invisible="1"/>
-                        <field name="name" string="Nombre de Etapa" required="1"/>
-                        <field name="project_number" string="Número de Obra" required="1" readonly="0"/>
+                        <field name="name" string="Nombre de Etapa"/>
+                        <field name="project_number" string="Número de Obra" readonly="1" />
                         <field name="deadline_date" string="Fecha de Entrega"/>
                     </group>
-                    <notebook invisible="1">
-                        <page string="Líneas de Material">
-                            <field name="material_line">
-                                <tree>
-                                    <field name="product_id" string="Producto"/>
-                                    <field name="product_uom_qty" string="Cantidad"/>
-                                    <field name="qty_done" string="Cantidad Realizada"/>
-                                </tree>
-                            </field>
-                        </page>
-                    </notebook>
                 </sheet>
             </form>
         </field>
     </record>
 
-    <!-- Acción para mostrar la vista -->
+    <!-- Acción para mostrar el modelo en Odoo -->
     <record id="action_material_reservation_stage" model="ir.actions.act_window">
-        <field name="name">Etapas de Reservas de Material</field>
+        <field name="name">Etapas de Reservación de Material</field>
         <field name="res_model">material.reservation.stage</field>
         <field name="view_mode">tree,form</field>
-        <field name="help" type="html">
-            <p>
-                Aquí puedes gestionar las etapas de reservas de material asociadas a las órdenes de venta.
-            </p>
-        </field>
     </record>
 
-    <!-- Menú en el módulo de ventas -->
+    <!-- Menú en Ventas -->
     <menuitem id="menu_material_reservation_stage"
-              name="Etapas de Reservas de Material"
+              name="Etapas de Reservación"
               parent="sale.sale_order_menu"
               action="action_material_reservation_stage"
               sequence="10"/>
 </odoo>
-
