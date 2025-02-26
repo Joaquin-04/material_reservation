@@ -124,7 +124,7 @@ class SaleOrder(models.Model):
             missing_info = "\n".join(
                 [f"- Producto: {line.product_id.display_name}" for line in missing_stage_lines]
             )
-            raise exceptions.UserError(
+            raise UserError(
                 "No se puede confirmar la orden porque hay reservas de materiales sin una etapa asignada. "
                 "Por favor, revisa las siguientes líneas:\n" + missing_info
             )

@@ -48,8 +48,10 @@
                                 <field name="qty_done" readonly="1" string="Hechas"/>
                                 <field name="product_uom"/>
                                 <field name="availability" widget="availability" readonly="1" string="Disponibilidad"/>
-                                <!-- Campo de etapa -->
-                                <field name="stage_id" options="{'no_create':true}" domain="[('project_number', '=', context.get('default_project_number'))]"/>
+                                <!-- Campo de etapa 
+                                <field name="stage_id" string="Etapa"/>
+                                -->
+                                <field name="stage_id" domain="[('project_number', '=', context.get('default_project_number'))]"/>
 
                             </group>
                         </form>
