@@ -97,7 +97,7 @@ class SaleOrder(models.Model):
         elif company_id == 3:
             default_warehouse = default_warehouses[0]
         else:
-            default_warehouse = self.warehouse if self.warehouse else False
+            default_warehouse = self.warehouse_id if self.warehouse_id else False
             
 
             
