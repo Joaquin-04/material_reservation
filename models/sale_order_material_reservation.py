@@ -97,9 +97,8 @@ class SaleOrder(models.Model):
         elif company_id == 3:
             default_warehouse = default_warehouses[0]
         else:
-            default_warehouse = self.studio_almacen if self.studio_almacen else False
+            default_warehouse = self.warehouse if self.warehouse else False
             
-
             
         return default_warehouse.id if default_warehouse else False
 
@@ -299,18 +298,19 @@ class MaterialReservationStage(models.Model):
         help="Deadline for delivering all materials for this stage."
     )
 
-    # En MaterialReservationStage (sale_order_material_reservation.py)
     @api.depends('material_line.order_id.x_studio_nv_numero_de_obra_relacionada')
     def _compute_project_number(self):
         for reservation in self:
-            obras = reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
-            if obras:
-                # Opción 1: Tomar el primer valor y mostrar advertencia
-                reservation.project_number = obras[0]
-                _logger.warning(f"Etapa {reservation.name} tiene múltiples obras: {obras}. Usando {obras[0]}")
-
-                # Opción 2: Concatenar valores (ej: "123, 456")
-                # reservation.project_number = ", ".join(map(str, set(obras)))
+            _logger.warning(f"linea: {reservation.material_line} ")
+            obra_relacionada = (
+                reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
+            )
+            _logger.warning(f"obra {obra_relacionada} ")
+            if obra_relacionada:
+                # Verifica si hay múltiples números de obra y lanza un error
+                #if len(set(obra_relacionada)) > 1:
+                #    raise UserError("Hay múltiples números de obra relacionados en las líneas de material.")
+                reservation.project_number = obra_relacionada[0]
             else:
                 reservation.project_number = False
 
