@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <!-- 1) Vista form del wizard -->
+  <record id="view_material_reservation_split_wizard_form" model="ir.ui.view">
+    <field name="name">material.reservation.split.wizard.form</field>
+    <field name="model">material.reservation.split.wizard</field>
+    <field name="arch" type="xml">
+      <form string="Dividir Reserva de Material">
+        <sheet>
+          <group>
+                <field name="line_id" readonly="1"/>
+                <!-- Mostrar aquí el proyecto para depurar -->
+                <field name="project_id" readonly="1"/>
+          </group>
+
+          <!-- Aquí abrimos la lista de split_lines (modelo split.line) -->
+          <field name="split_lines">
+             <tree editable="bottom">
+                 <field name="wizard_id" invisible="1"/>
+                 <!-- Observen que: 
+                    • & se escapa como &amp;
+                    • excluimos por id != current_stage
+                  -->
+                  <field name="stage_id"
+                     domain="['&amp;',('project_id','=', context.get('project_id')),('id','not in', context.get('used_stage_ids'))]"/>
+                 <field name="quantity"/>
+            </tree>
+          </field>
+
+          <footer>
+            <button string="Confirmar"
+                    type="object"
+                    name="action_confirm"
+                    class="btn-primary"/>
+            <button string="Cancelar"
+                    class="btn-secondary"
+                    special="cancel"/>
+          </footer>
+
+        </sheet>
+      </form>
+    </field>
+  </record>
+
+  <!-- 2) Acción para abrir el wizard -->
+  <record id="action_material_reservation_split_wizard" model="ir.actions.act_window">
+    <field name="name">Dividir Reserva</field>
+    <field name="res_model">material.reservation.split.wizard</field>
+    <field name="view_mode">form</field>
+    <field name="view_id" ref="view_material_reservation_split_wizard_form"/>
+    <field name="target">new</field>
+  </record>
+</odoo>

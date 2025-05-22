@@ -24,6 +24,9 @@
                     <field name="state" invisible="1"/>
                     <field name="material_reservation_ids" context="{'default_order_id': active_id,'default_project_number': x_studio_nv_numero_de_obra_relacionada, 'sale_order_state': state}">
                         <tree editable="bottom">
+                                
+
+                            
                             <field name="product_id" 
                                readonly="id != False and context.get('sale_order_state') == 'sale'"
                                />
@@ -37,6 +40,8 @@
                             -->
                             
                             <field name="stage_id" domain="[('project_number', '=', context.get('default_project_number'))]"/>
+                            <field name="qty_pending" column_invisible="1"/>
+                            <button name="action_open_split_wizard" type="object" string="Dividir" icon="fa-cut" class="oe_highlight" invisible="qty_pending == 0"/>
 
                         </tree>
                         
@@ -61,3 +66,4 @@
         </field>
     </record>
 </odoo>
+

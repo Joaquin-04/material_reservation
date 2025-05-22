@@ -1,0 +1,8 @@
+<odoo>
+  <!-- Grupo base para usuarios de reservas de material -->
+  <record id="group_material_reservation_user" model="res.groups">
+    <field name="name">Material Reservation User</field>
+    <!-- Hereda de Usuario interno, o de un grupo más específico si prefieres -->
+    <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+  </record>
+</odoo>

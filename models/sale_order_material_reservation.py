@@ -97,8 +97,9 @@ class SaleOrder(models.Model):
         elif company_id == 3:
             default_warehouse = default_warehouses[0]
         else:
-            default_warehouse = self.warehouse if self.warehouse else False
+            default_warehouse = self.studio_almacen if self.studio_almacen else False
             
+
             
         return default_warehouse.id if default_warehouse else False
 
@@ -113,6 +114,8 @@ class SaleOrder(models.Model):
         pickings = self.sale_stock_link_id.picking_ids
         action['domain'] = [('id', 'in', pickings.ids)]
         return action
+
+    
 
     def action_confirm(self):
         # Validar que todas las líneas de reserva de materiales tengan un stage_id
@@ -200,6 +203,54 @@ class SaleOrder(models.Model):
             }
         }
 
+
+    
+    
+    
+    def write(self, vals):
+        _logger.warning("Write!!!")
+        _logger.warning(f"valores: {vals}")
+        
+        # Ejecutar primero la escritura normal para tener los últimos valores
+        result = super(SaleOrder, self).write(vals)
+        
+        if 'project_id' in vals:
+            # Actualizar reservas de material
+            for reservation in self.material_reservation_ids:
+                reservation.stage_id = False
+            project = None
+            if vals['project_id']:
+                # Se ha asignado un proyecto, obtenemos su información
+                project = self.env['project.project'].browse(vals['project_id'])
+                
+                
+                # Actualizar campos personalizados
+                new_vals = {}
+                if project.obra_nr:
+                    new_vals['x_studio_nv_numero_de_obra_relacionada'] = project.obra_nr
+                else:
+                    new_vals['x_studio_nv_numero_de_obra_relacionada'] = False
+                
+                if project.obra_padre_id:
+                    new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_padre_id.obra_nr
+                else:
+                    new_vals['x_studio_nv_numero_de_obra_padre'] = False
+                
+                self.write(new_vals)  # Actualizar campos sin entrar en recursión
+                
+                # Actualizar distribución analítica después de confirmar cambios
+                self._update_analytic_distribution()
+            else:
+                # Limpiar distribución analítica si se quita el proyecto
+                self._update_analytic_distribution(reset=True)
+                
+                # Limpiar campos si se quita el proyecto
+                self.write({
+                    'x_studio_nv_numero_de_obra_relacionada': 0,
+                    'x_studio_nv_numero_de_obra_padre': 0,
+                })
+        
+        return result
     
 
     #helpers
@@ -278,6 +329,8 @@ class MaterialReservationStage(models.Model):
     _name = 'material.reservation.stage'
     _description = 'Material Reservation Stage'
 
+    active = fields.Boolean(string='Activo', default=True)  # ← permite archivar/desarchivar registros :contentReference[oaicite:0]{index=0}
+
     material_line = fields.One2many(
         'sale.order.material.reservation.line','stage_id',
         string="Linea de Material",
@@ -285,51 +338,45 @@ class MaterialReservationStage(models.Model):
         help="material reservation associated with the Stage.",
     )
 
-    name = fields.Char(string="Stage Name", required=True)
+    name = fields.Char(string="Nombre", required=True)
+
+    project_id = fields.Many2one(
+        'project.project', string='Proyecto', required=True, ondelete='cascade'
+    )
     
+    obra_nr = fields.Char(related='project_id.obra_nr', string='Número de Obra', store=True)
+
     project_number = fields.Integer(
-        string="Project Number", 
+        string="Número del proyecto", 
         help="Related project number.",
         compute="_compute_project_number",
         store=True  # Este campo ahora será almacenado
     )
     deadline_date = fields.Date(
-        string="Delivery Deadline",
+        string="Fecha Limite",
         help="Deadline for delivering all materials for this stage."
     )
-
-    @api.depends('material_line.order_id.x_studio_nv_numero_de_obra_relacionada')
-    def _compute_project_number(self):
-        for reservation in self:
-            _logger.warning(f"linea: {reservation.material_line} ")
-            obra_relacionada = (
-                reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
-            )
-            _logger.warning(f"obra {obra_relacionada} ")
-            if obra_relacionada:
-                # Verifica si hay múltiples números de obra y lanza un error
-                #if len(set(obra_relacionada)) > 1:
-                #    raise UserError("Hay múltiples números de obra relacionados en las líneas de material.")
-                reservation.project_number = obra_relacionada[0]
-            else:
-                reservation.project_number = False
+    
 
     @api.model
-    def create(self, vals):
-        record = super().create(vals)
-        #_logger.warning(f"Etapa: {record.name} con datos: {vals}")
-        #_logger.warning(f"Numero de la obra papa: {record.material_line.order_id.x_studio_nv_numero_de_obra_relacionada}")
-
-        record.project_number=record.material_line.order_id.x_studio_nv_numero_de_obra_relacionada
-        
-        return record
+    def _name_search(self, name='', domain=None, operator='ilike',limit=100, name_get_uid=None, order=None):
+        """
+        Busca solo etapas activas, y permite buscar por name o cod.
+        Odoo pasará 'order' automáticamente, así que debemos aceptarlo.
+        """
+        domain = domain or []
+        # 1) Sólo activas
+        domain = [('active', '=', True)] + domain
+        # 2) Si hubo texto, buscamos en name ó en cod
+        if name:
+            domain = ['|',
+                      ('name', operator, name),
+                     ] + domain
+        # 3) Llamamos al buscador interno, respetando el order si vino
+        return self._search(domain, limit=limit, order=order)
 
 
     
-
-
-
-
 class SaleOrderMaterialReservationLine(models.Model):
     _name = 'sale.order.material.reservation.line'
     _description = 'Sale Order Material Reservation Line'
@@ -361,7 +408,7 @@ class SaleOrderMaterialReservationLine(models.Model):
     )
     order_id = fields.Many2one(
         'sale.order', 
-        string="Order", 
+        string="Orden", 
         ondelete="cascade", 
         required=True
     )
@@ -378,7 +425,7 @@ class SaleOrderMaterialReservationLine(models.Model):
     
     product_uom = fields.Many2one(
         comodel_name='uom.uom',
-        string="Unit of Measure",
+        string="Medida",
         compute='_compute_product_uom',
         store=True,
         readonly=False
@@ -589,8 +636,8 @@ class SaleOrderMaterialReservationLine(models.Model):
         
         return new_picking
 
+    """
     # Constrains
-
     @api.constrains('product_id', 'stage_id')
     def _check_duplicate_product_stage(self):
         #_logger.warning(f"Entrando a _check_duplicate_product_stage")
@@ -609,6 +656,48 @@ class SaleOrderMaterialReservationLine(models.Model):
             
             if duplicates:
                 raise ValidationError(_(f"No puedes agregar el mismo producto con la misma etapa."))
+
+    """
+
+    @api.constrains('product_id', 'stage_id')
+    def _check_duplicate_product_stage(self):
+        for line in self:
+            # Si no hay etapa asignada, no validamos duplicados
+            if not line.stage_id:
+                continue
+            # Buscamos otras líneas con mismo producto y misma etapa
+            others = self.search([
+                ('id', '!=', line.id),
+                ('order_id', '=', line.order_id.id),
+                ('product_id', '=', line.product_id.id),
+                ('stage_id', '=', line.stage_id.id),
+            ], limit=1)
+            if others:
+                raise ValidationError(_("No puedes agregar el mismo producto con la misma etapa."))
+
+
+    def action_open_split_wizard(self):
+        self.ensure_one()
+
+        # 1. Recoger todas las etapas usadas para este producto en la misma orden
+        used = self.order_id.material_reservation_ids \
+                   .filtered(lambda l: l.product_id.id == self.product_id.id) \
+                   .mapped('stage_id.id')
+        
+        return {
+            'name': 'Dividir Reserva de Material',
+            'type': 'ir.actions.act_window',
+            'res_model': 'material.reservation.split.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_project_id': self.order_id.project_id.id,  # inicializa el campo project_id en el wizard
+                'project_id':         self.order_id.project_id.id,  # clave “permanente” para dominos
+                'default_line_id':    self.id,
+                'default_quantity':   self.product_uom_qty,
+                'used_stage_ids':     used,    
+            },
+        }
 
 
 

@@ -8,6 +8,8 @@
                 <field name="name" string="Nombre de Etapa"/>
                 <field name="project_number" string="Número de Obra"/>
                 <field name="deadline_date" string="Fecha de Entrega"/>
+                <field name="project_id" string="Obra Relacionada"/>
+                <field name="obra_nr" string="Número de Obra Relacionada"/>
             </tree>
         </field>
     </record>
@@ -23,17 +25,40 @@
                         <field name="name" string="Nombre de Etapa"/>
                         <field name="project_number" string="Número de Obra" readonly="1" />
                         <field name="deadline_date" string="Fecha de Entrega"/>
+                        <field name="project_id" string="Obra Relacionada" options="{'no_create':True,'no_create_edit':True}"/>
+                        <field name="obra_nr" string="Número de Obra Relacionada"/>
                     </group>
                 </sheet>
             </form>
         </field>
     </record>
 
-    <!-- Acción para mostrar el modelo en Odoo -->
+
+    <!-- Añade un search view con filtros por nombre, proyecto y activo/inactivo -->
+    <!-- 3) Vista de búsqueda -->
+    <record id="view_material_reservation_stage_search" model="ir.ui.view">
+        <field name="name">material.reservation.stage.search</field>
+        <field name="model">material.reservation.stage</field>
+        <field name="arch" type="xml">
+            <search>
+                <!-- Búsqueda por nombre -->
+                <field name="name" string="Nombre"/>
+                <!-- Búsqueda por proyecto -->
+                <field name="project_id" string="Proyecto"/>
+                <filter name="archived_filter"
+                        string="Archivadas"
+                        domain="[('active','=',False)]"/>
+            </search>
+        </field>
+    </record>
+
+    <!-- 4) Acción ventana -->
     <record id="action_material_reservation_stage" model="ir.actions.act_window">
-        <field name="name">Etapas de Reservación de Material</field>
+        <field name="name">Etapas de Reserva</field>
         <field name="res_model">material.reservation.stage</field>
         <field name="view_mode">tree,form</field>
+        <field name="view_id" ref="view_material_reservation_stage_tree"/>
+        <field name="search_view_id" ref="view_material_reservation_stage_search"/>
     </record>
 
     <!-- Menú en Ventas -->
@@ -43,3 +68,5 @@
               action="action_material_reservation_stage"
               sequence="10"/>
 </odoo>
+
+
