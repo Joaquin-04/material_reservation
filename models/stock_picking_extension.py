@@ -12,16 +12,16 @@ class StockPicking(models.Model):
 
     sale_stock_link_id = fields.Many2one('sale.stock.link', string='Sale Stock Link')
     
-    has_reservation = fields.Boolean(string='Tiene una Reserva')
+    has_reservation = fields.Boolean(string='Tiene una Reserva',default=False)
 
     project_id = fields.Many2one(
         'project.project',
         string="Proyecto",
-        domain="[('company_id', 'in', allowed_company_ids)]",
         compute="_compute_project_id",
-        readonly=False
+        readonly=False,
+        store=True        
     )
-    
+
     def _compute_project_id(self):
         _logger.warning(f"**********************************************COMPUTE**********************************************")
         for picking in self:
@@ -29,9 +29,9 @@ class StockPicking(models.Model):
                 obra_nr = picking.x_studio_nv_numero_de_obra_relacionada
                 proyecto = self.env['project.project'].search([('obra_nr','=',obra_nr)])
                 picking.project_id = proyecto
-                _logger.warning(f"Proyecto {proyecto.name} asignado al remito {picking.name}")
+                #_logger.warning(f"Proyecto {proyecto.name} asignado al remito {picking.name}")
             else:
-                _logger.warning(f"No se a asignado asignado nada al remito {picking.name}")
+                #_logger.warning(f"No se a asignado asignado nada al remito {picking.name}")
                 picking.project_id = False
 
     def _compute_has_reservation(self):
@@ -47,33 +47,40 @@ class StockPicking(models.Model):
 
 
     def write(self, vals):
-        _logger.warning("Write!!! Que se activa desde material_reservation stock_picking_extension.py")
-        _logger.warning(f"valores: {vals}")
+        _logger.warning("Write!!! (versión corregida sin recursión)")
         
-        if 'project_id' in vals:
-            if vals['project_id']:
-                # Se ha asignado un proyecto, obtenemos su información
-                project = self.env['project.project'].browse(vals['project_id'])
-                if project:
-                    
-                    new_vals = {}
-                    if project.obra_nr:
-                        new_vals['x_studio_nv_numero_de_obra_relacionada'] = project.obra_nr
-                    else:
-                        new_vals['x_studio_nv_numero_de_obra_relacionada'] = False
-                    if project.obra_padre_id:
-                        new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_padre_id.obra_nr
-                    else:
-                        new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_nr
-                    vals.update(new_vals)
-            else:
-                # Se está borrando el proyecto, establecemos los campos en 0 o False
-                vals.update({
-                    'x_studio_nv_numero_de_obra_relacionada': 0,
-                    'x_studio_nv_numero_de_obra_padre': 0,
-                })
+        # Evitar recursión: bandera para saber si ya estamos actualizando
+        if not self.env.context.get('updating_project_fields'):
+            # Si se actualiza project_id -> actualizar x_studio_nv_numero_de_obra_relacionada
+            if 'project_id' in vals:
+                project_id = vals['project_id']
+                new_vals = {}
+                if project_id:
+                    project = self.env['project.project'].browse(project_id)
+                    new_vals['x_studio_nv_numero_de_obra_relacionada'] = project.obra_nr or False
+                    new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_padre_id.obra_nr if project.obra_padre_id else project.obra_nr
+                else:
+                    new_vals['x_studio_nv_numero_de_obra_relacionada'] = False
+                    new_vals['x_studio_nv_numero_de_obra_padre'] = False
+                
+                # Actualizar con contexto para evitar recursión
+                return super(StockPicking, self.with_context(updating_project_fields=True)).write({**vals, **new_vals})
+            
+            # Si se actualiza x_studio_nv_numero_de_obra_relacionada -> buscar project_id
+            elif 'x_studio_nv_numero_de_obra_relacionada' in vals:
+                obra_nr = vals['x_studio_nv_numero_de_obra_relacionada']
+                obra_nr_str = str(obra_nr) if obra_nr else False
+                proyecto = self.env['project.project'].search(
+                    [('obra_nr', '=', obra_nr_str)], 
+                    limit=1
+                )
+                if proyecto:
+                    return super(StockPicking, self.with_context(updating_project_fields=True)).write({**vals, 'project_id': proyecto.id})
+        
         return super(StockPicking, self).write(vals)
 
+
+    
 
          
 
@@ -100,16 +107,16 @@ class StockMove(models.Model):
         """Actualiza las cantidades hechas en las líneas de reserva relacionadas."""
         for move in self:
             if move.origin_returned_move_id:
-                _logger.warning(f"El movimiento {move.id} es una devolución de {move.origin_returned_move_id.id}")
+                #_logger.warning(f"El movimiento {move.id} es una devolución de {move.origin_returned_move_id.id}")
                 # Actualiza cantidades reservadas o hechas en la línea relacionada
                 if move.reservation_line_id:
                     move.reservation_line_id.qty_done -= move.quantity or 0
-                    _logger.warning(f"Actualizando la línea de reserva para devolución. Cantidad hecha: {move.reservation_line_id.qty_done}")
+                    #_logger.warning(f"Actualizando la línea de reserva para devolución. Cantidad hecha: {move.reservation_line_id.qty_done}")
             else:
                 # Si hay una línea de reserva, realiza las actualizaciones
                 if move.reservation_line_id:
                     move.reservation_line_id.qty_done += move.quantity or 0
-                    _logger.warning(f"Cantidad hechas {move.quantity} - {move.reservation_line_id.qty_done}")
+                    #_logger.warning(f"Cantidad hechas {move.quantity} - {move.reservation_line_id.qty_done}")
                 else:
                     _logger.warning(f"El movimiento {move.id} no está relacionado con ninguna línea de reserva.")
             
@@ -132,18 +139,18 @@ class StockMove(models.Model):
                 # Si hay un vínculo con SaleStockLink, pero sin línea de reserva, se verifica si es aplicable asignar una etapa.
                 elif 'sale_stock_link_id' in vals and vals['sale_stock_link_id']:
                     sale_stock_link = self.env['sale.stock.link'].browse(vals['sale_stock_link_id'])
-                    _logger.warning(f"Tengo sale_stock_link: {sale_stock_link}")
+                    #_logger.warning(f"Tengo sale_stock_link: {sale_stock_link}")
                     if sale_stock_link.sale_order_id:
                         # Busca la línea de reserva asociada para este movimiento específico
                         reservations = sale_stock_link.sale_order_id.mapped('material_reservation_ids')
-                        _logger.warning(f" reservations: {reservations}")
+                        #_logger.warning(f" reservations: {reservations}")
                         product_id = vals.get('product_id')
-                        _logger.warning(f" product_id: {product_id}")
+                        #_logger.warning(f" product_id: {product_id}")
                         specific_reservations = reservations.filtered(lambda r: r.product_id.id == product_id)
-                        _logger.warning(f" specific_reservations: {specific_reservations}")
+                        #_logger.warning(f" specific_reservations: {specific_reservations}")
                         if specific_reservations:
                             vals['stage_id'] = specific_reservations[0].stage_id.id
-                            _logger.warning(f"Heredando etapa de la reserva específica para producto {product_id}: {specific_reservations[0].stage_id}")
+                            #_logger.warning(f"Heredando etapa de la reserva específica para producto {product_id}: {specific_reservations[0].stage_id}")
         
                 
                 # Si 'reservation_line_id' no está presente, no se fuerza su asignación
@@ -151,19 +158,19 @@ class StockMove(models.Model):
                 record = super().create(vals)
         
                 record['quantity']=0.0
-                _logger.warning(f"StockMove creado con ID {record.id}, Stage: {record.stage_id}, Reservation Line: {record.reservation_line_id}")
+                #_logger.warning(f"StockMove creado con ID {record.id}, Stage: {record.stage_id}, Reservation Line: {record.reservation_line_id}")
                 return record
             else:
                 _logger.warning(f"Lo mandamos al create del super")
                 return super().create(vals)
         else:
-            _logger.warning(f"Lo mandamos al create del super")
+            _logger.warning(f"Lo mandamos al create del super x2 ")
             return super().create(vals)
     
 
     def write(self, vals):
         _logger.warning(f"Entrando en el write valores: {vals}")
-        _logger.warning(f"valores: {vals}")
+        #_logger.warning(f"valores: {vals}")
         # Actualiza la etapa si la línea de reserva cambia.
         if 'reservation_line_id' in vals and vals['reservation_line_id']:
             reservation_line = self.env['sale.order.material.reservation.line'].browse(vals['reservation_line_id'])

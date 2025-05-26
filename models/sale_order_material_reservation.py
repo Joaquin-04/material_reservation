@@ -46,7 +46,7 @@ class SaleOrder(models.Model):
 
     @api.onchange('x_studio_nv_numero_de_obra_relacionada')
     def _onchange_project_number(self):
-        #_logger.warning("Entre al onchange de obra_relacionada")
+        _logger.warning("Entre al onchange de obra_relacionada")
         for reservation in self.material_reservation_ids:
             reservation.stage_id = False  # Vacía la etapa cuando cambia el número de proyecto
     
@@ -118,7 +118,7 @@ class SaleOrder(models.Model):
                 # 2) Si quita el proyecto, limpio etapas
                 if not proyecto_nuevo:
                     order.material_reservation_ids.write({'stage_id': False})
-                    _logger.info(f"[Reserva] Cotización {order.name}: proyecto eliminado, limpio etapas.")
+                    #_logger.info(f"[Reserva] Cotización {order.name}: proyecto eliminado, limpio etapas.")
                     continue
 
                 # 3) Si asigna proyecto, migramos etapas antiguas al nuevo
@@ -136,7 +136,7 @@ class SaleOrder(models.Model):
                             'name':          etapa_antigua.name,
                             'project_number':    proyecto_nuevo.obra_nr,
                         })
-                        _logger.info(f"[Reserva] Creada etapa “{etapa.name}” ({etapa.id}) en proyecto {proyecto_nuevo}")
+                        #_logger.info(f"[Reserva] Creada etapa “{etapa.name}” ({etapa.id}) en proyecto {proyecto_nuevo}")
                     else:
                         _logger.info(f"[Reserva] Reuso etapa “{etapa.name}” ({etapa.id}) en proyecto {proyecto_nuevo}")
                     line.stage_id = etapa.id
@@ -156,11 +156,11 @@ class SaleOrder(models.Model):
         cambiando_proyecto = 'project_id' in vals
         proyecto_id_nuevo = vals.get('project_id')  # puede ser False o int
 
-        _logger.info(f"[Write] SaleOrder {self.ids}: valores entrantes {vals}")
+        #_logger.info(f"[Write] SaleOrder {self.ids}: valores entrantes {vals}")
 
         # 1) Aplicamos el write estándar
         result = super().write(vals)
-        _logger.debug(f"[Write] SaleOrder {self.ids}: write estándar aplicado")
+        #_logger.debug(f"[Write] SaleOrder {self.ids}: write estándar aplicado")
 
         if cambiando_proyecto:
             Stage = self.env['material.reservation.stage']
@@ -168,7 +168,7 @@ class SaleOrder(models.Model):
                 # 2) Se quita el proyecto
                 if not proyecto_id_nuevo:
                     order.material_reservation_ids.write({'stage_id': False})
-                    _logger.info(f"[Reserva] Order {order.name}: proyecto eliminado, etapas reseteadas")
+                    #_logger.info(f"[Reserva] Order {order.name}: proyecto eliminado, etapas reseteadas")
                     # Limpiar campos de obra relacionada
                     super(SaleOrder, order).write({
                         'x_studio_nv_numero_de_obra_relacionada': 0,
@@ -180,7 +180,7 @@ class SaleOrder(models.Model):
 
                 # 3) Se asigna un proyecto nuevo
                 project = self.env['project.project'].browse(proyecto_id_nuevo)
-                _logger.info(f"[Reserva] Order {order.name}: migrando etapas al proyecto {project.name} (#{project.id})")
+                #_logger.info(f"[Reserva] Order {order.name}: migrando etapas al proyecto {project.name} (#{project.id})")
 
                 for line in order.material_reservation_ids:
                     old_stage = line.stage_id
@@ -202,7 +202,7 @@ class SaleOrder(models.Model):
                             'project_number': project.obra_nr,
                             'deadline_date': old_stage.deadline_date or False,
                         })
-                        _logger.info(f"[Reserva] Creo etapa “{etapa.name}” (#{etapa.id}) en proyecto {project.name}")
+                        #_logger.info(f"[Reserva] Creo etapa “{etapa.name}” (#{etapa.id}) en proyecto {project.name}")
 
                     line.stage_id = etapa.id
                     _logger.debug(f"[Reserva] Linea {line.id}: etapa reasignada a {etapa.name}")
@@ -551,7 +551,7 @@ class SaleOrderMaterialReservationLine(models.Model):
                 if vals['product_uom_qty'] < line.qty_done:
                     raise UserError(_("No puedes establecer una cantidad menor a la hecha."))
                 line.qty_pending = max(0, vals['product_uom_qty'] - line.qty_done)
-                _logger.warning(f"cantidad pendiente {line.qty_pending} para la linea: {line.name}")
+                #_logger.warning(f"cantidad pendiente {line.qty_pending} para la linea: {line.name}")
                 updated_lines.append(line)
 
         
@@ -632,10 +632,10 @@ class SaleOrderMaterialReservationLine(models.Model):
             lambda m: m.reservation_line_id == line
         )
         move_ids=[m.id for m in all_moves]
-        _logger.warning(f"movimientos existentes: {existing_moves}\n Todos los movimientos: {all_moves}")
+        #_logger.warning(f"movimientos existentes: {existing_moves}\n Todos los movimientos: {all_moves}")
         if existing_moves:
             for move in existing_moves:
-                _logger.warning(f"movimiente {move.name}")
+                #_logger.warning(f"movimiente {move.name}")
                 move.product_uom_qty = max(0, line.qty_pending)
                 if move.product_uom_qty == 0:
                     move.state = 'cancel'
