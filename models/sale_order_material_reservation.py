@@ -97,12 +97,129 @@ class SaleOrder(models.Model):
         elif company_id == 3:
             default_warehouse = default_warehouses[0]
         else:
-            default_warehouse = self.warehouse if self.warehouse else False
+            default_warehouse = self.studio_almacen if self.studio_almacen else False
             
+
             
         return default_warehouse.id if default_warehouse else False
 
+    
+    def write(self, vals):
+        # 1) ¿Cambia el proyecto?
+        cambiando_proyecto = 'project_id' in vals
+        proyecto_nuevo = vals.get('project_id')
 
+        # Primero aplicamos el write estándar
+        res = super().write(vals)
+
+        if cambiando_proyecto:
+            Stage = self.env['material.reservation.stage']
+            for order in self:
+                # 2) Si quita el proyecto, limpio etapas
+                if not proyecto_nuevo:
+                    order.material_reservation_ids.write({'stage_id': False})
+                    _logger.info(f"[Reserva] Cotización {order.name}: proyecto eliminado, limpio etapas.")
+                    continue
+
+                # 3) Si asigna proyecto, migramos etapas antiguas al nuevo
+                for line in order.material_reservation_ids:
+                    proyecto_nuevo = self.env['project.project'].browse(vals['project_id'])
+                    etapa_antigua = line.stage_id
+                    if not etapa_antigua:
+                        continue
+                    # Buscar etapa igual en el nuevo proyecto
+                    etapa = Stage.search([
+                        ('project_number','=', proyecto_nuevo.obra_nr),
+                        ('name','=', etapa_antigua.name)], limit=1)
+                    if not etapa:
+                        etapa = Stage.create({
+                            'name':          etapa_antigua.name,
+                            'project_number':    proyecto_nuevo.obra_nr,
+                        })
+                        _logger.info(f"[Reserva] Creada etapa “{etapa.name}” ({etapa.id}) en proyecto {proyecto_nuevo}")
+                    else:
+                        _logger.info(f"[Reserva] Reuso etapa “{etapa.name}” ({etapa.id}) en proyecto {proyecto_nuevo}")
+                    line.stage_id = etapa.id
+
+        return res
+
+
+    def write(self, vals):
+        """
+        Al sobrescribir write:
+         1) Detectamos si cambia project_id.
+         2) Llamamos al write base una sola vez.
+         3) Si se quita el proyecto: limpiamos todas las etapas de reserva.
+         4) Si se asigna un proyecto: migramos/reutilizamos etapas antiguas,
+            actualizamos campos relacionados y distribución analítica.
+        """
+        cambiando_proyecto = 'project_id' in vals
+        proyecto_id_nuevo = vals.get('project_id')  # puede ser False o int
+
+        _logger.info(f"[Write] SaleOrder {self.ids}: valores entrantes {vals}")
+
+        # 1) Aplicamos el write estándar
+        result = super().write(vals)
+        _logger.debug(f"[Write] SaleOrder {self.ids}: write estándar aplicado")
+
+        if cambiando_proyecto:
+            Stage = self.env['material.reservation.stage']
+            for order in self:
+                # 2) Se quita el proyecto
+                if not proyecto_id_nuevo:
+                    order.material_reservation_ids.write({'stage_id': False})
+                    _logger.info(f"[Reserva] Order {order.name}: proyecto eliminado, etapas reseteadas")
+                    # Limpiar campos de obra relacionada
+                    super(SaleOrder, order).write({
+                        'x_studio_nv_numero_de_obra_relacionada': 0,
+                        'x_studio_nv_numero_de_obra_padre': 0,
+                    })
+                    # Limpiar distribución analítica
+                    order._update_analytic_distribution(reset=True)
+                    continue
+
+                # 3) Se asigna un proyecto nuevo
+                project = self.env['project.project'].browse(proyecto_id_nuevo)
+                _logger.info(f"[Reserva] Order {order.name}: migrando etapas al proyecto {project.name} (#{project.id})")
+
+                for line in order.material_reservation_ids:
+                    old_stage = line.stage_id
+                    if not old_stage:
+                        _logger.debug(f"[Reserva] Linea {line.id}: sin etapa vieja, se omite")
+                        continue
+
+                    # Intentar encontrar etapa igual en el nuevo proyecto
+                    etapa = Stage.search([
+                        ('project_number', '=', project.obra_nr),
+                        ('name',       '=', old_stage.name),
+                    ], limit=1)
+
+                    if etapa:
+                        _logger.info(f"[Reserva] Reutilizo etapa “{etapa.name}” (#{etapa.id}) en proyecto {project.name}")
+                    else:
+                        etapa = Stage.create({
+                            'name':       old_stage.name,
+                            'project_number': project.obra_nr,
+                            'deadline_date': old_stage.deadline_date or False,
+                        })
+                        _logger.info(f"[Reserva] Creo etapa “{etapa.name}” (#{etapa.id}) en proyecto {project.name}")
+
+                    line.stage_id = etapa.id
+                    _logger.debug(f"[Reserva] Linea {line.id}: etapa reasignada a {etapa.name}")
+
+                # 4) Actualizar campos de obra relacionada en la cabecera
+                update_vals = {
+                    'x_studio_nv_numero_de_obra_relacionada': project.obra_nr or False,
+                    'x_studio_nv_numero_de_obra_padre': project.obra_padre_nr or False,
+                }
+                super(SaleOrder, order).write(update_vals)
+                _logger.info(f"[Reserva] Order {order.name}: campos de obra relacionada actualizados {update_vals}")
+
+                # 5) Actualizar distribución analítica
+                order._update_analytic_distribution()
+                _logger.debug(f"[Reserva] Order {order.name}: distribución analítica actualizada")
+
+        return result
         
     
     # Actions
@@ -114,6 +231,7 @@ class SaleOrder(models.Model):
         action['domain'] = [('id', 'in', pickings.ids)]
         return action
 
+    
     def action_confirm(self):
         # Validar que todas las líneas de reserva de materiales tengan un stage_id
         missing_stage_lines = self.material_reservation_ids.filtered(lambda l: not l.stage_id)
@@ -148,7 +266,7 @@ class SaleOrder(models.Model):
             self.action_create_material_reservation()
         return res
 
-
+    
     def action_create_material_reservation(self):
         """Botón para crear manualmente la transferencia de reserva."""
         
@@ -298,19 +416,18 @@ class MaterialReservationStage(models.Model):
         help="Deadline for delivering all materials for this stage."
     )
 
+    # En MaterialReservationStage (sale_order_material_reservation.py)
     @api.depends('material_line.order_id.x_studio_nv_numero_de_obra_relacionada')
     def _compute_project_number(self):
         for reservation in self:
-            _logger.warning(f"linea: {reservation.material_line} ")
-            obra_relacionada = (
-                reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
-            )
-            _logger.warning(f"obra {obra_relacionada} ")
-            if obra_relacionada:
-                # Verifica si hay múltiples números de obra y lanza un error
-                #if len(set(obra_relacionada)) > 1:
-                #    raise UserError("Hay múltiples números de obra relacionados en las líneas de material.")
-                reservation.project_number = obra_relacionada[0]
+            obras = reservation.material_line.mapped('order_id.x_studio_nv_numero_de_obra_relacionada')
+            if obras:
+                # Opción 1: Tomar el primer valor y mostrar advertencia
+                reservation.project_number = obras[0]
+                _logger.warning(f"Etapa {reservation.name} tiene múltiples obras: {obras}. Usando {obras[0]}")
+
+                # Opción 2: Concatenar valores (ej: "123, 456")
+                # reservation.project_number = ", ".join(map(str, set(obras)))
             else:
                 reservation.project_number = False
 
@@ -324,12 +441,7 @@ class MaterialReservationStage(models.Model):
         
         return record
 
-
     
-
-
-
-
 class SaleOrderMaterialReservationLine(models.Model):
     _name = 'sale.order.material.reservation.line'
     _description = 'Sale Order Material Reservation Line'

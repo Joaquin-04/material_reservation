@@ -14,6 +14,26 @@ class StockPicking(models.Model):
     
     has_reservation = fields.Boolean(string='Tiene una Reserva')
 
+    project_id = fields.Many2one(
+        'project.project',
+        string="Proyecto",
+        domain="[('company_id', 'in', allowed_company_ids)]",
+        compute="_compute_project_id",
+        readonly=False
+    )
+    
+    def _compute_project_id(self):
+        _logger.warning(f"**********************************************COMPUTE**********************************************")
+        for picking in self:
+            if picking.x_studio_nv_numero_de_obra_relacionada:
+                obra_nr = picking.x_studio_nv_numero_de_obra_relacionada
+                proyecto = self.env['project.project'].search([('obra_nr','=',obra_nr)])
+                picking.project_id = proyecto
+                _logger.warning(f"Proyecto {proyecto.name} asignado al remito {picking.name}")
+            else:
+                _logger.warning(f"No se a asignado asignado nada al remito {picking.name}")
+                picking.project_id = False
+
     def _compute_has_reservation(self):
         for picking in self:
             picking.has_reservation = bool(picking.material_reservation_ids)
@@ -24,6 +44,35 @@ class StockPicking(models.Model):
                 # Si no hay una línea de venta asociada, asegurarse de no afectar líneas de venta
                 move.sale_line_id = False  # Por redundancia, para que Odoo no lo calcule en cascada
         return super(StockPicking, self).button_validate()
+
+
+    def write(self, vals):
+        _logger.warning("Write!!! Que se activa desde material_reservation stock_picking_extension.py")
+        _logger.warning(f"valores: {vals}")
+        
+        if 'project_id' in vals:
+            if vals['project_id']:
+                # Se ha asignado un proyecto, obtenemos su información
+                project = self.env['project.project'].browse(vals['project_id'])
+                if project:
+                    
+                    new_vals = {}
+                    if project.obra_nr:
+                        new_vals['x_studio_nv_numero_de_obra_relacionada'] = project.obra_nr
+                    else:
+                        new_vals['x_studio_nv_numero_de_obra_relacionada'] = False
+                    if project.obra_padre_id:
+                        new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_padre_id.obra_nr
+                    else:
+                        new_vals['x_studio_nv_numero_de_obra_padre'] = project.obra_nr
+                    vals.update(new_vals)
+            else:
+                # Se está borrando el proyecto, establecemos los campos en 0 o False
+                vals.update({
+                    'x_studio_nv_numero_de_obra_relacionada': 0,
+                    'x_studio_nv_numero_de_obra_padre': 0,
+                })
+        return super(StockPicking, self).write(vals)
 
 
          
