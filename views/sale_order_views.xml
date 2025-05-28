@@ -22,7 +22,7 @@
                     <!-- Vista de líneas de reserva de materiales -->
                     <field name="x_studio_nv_numero_de_obra_relacionada" invisible="1"/>
                     <field name="state" invisible="1"/>
-                    <field name="material_reservation_ids" context="{'default_order_id': active_id,'default_project_number': x_studio_nv_numero_de_obra_relacionada, 'sale_order_state': state}">
+                    <field name="material_reservation_ids" readonly="state == 'draft'" context="{'default_order_id': active_id,'default_project_number': x_studio_nv_numero_de_obra_relacionada, 'sale_order_state': state}">
                         <tree editable="bottom">
                             <field name="product_id" 
                                readonly="id != False and context.get('sale_order_state') == 'sale'"
